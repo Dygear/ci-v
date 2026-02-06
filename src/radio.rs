@@ -45,6 +45,10 @@ pub struct Radio {
     config: RadioConfig,
     /// Internal read buffer to handle partial reads.
     buf: Vec<u8>,
+    /// Cumulative bytes written to the serial port.
+    tx_bytes: u64,
+    /// Cumulative bytes read from the serial port.
+    rx_bytes: u64,
 }
 
 impl Radio {
@@ -54,7 +58,24 @@ impl Radio {
             port,
             config,
             buf: Vec::with_capacity(256),
+            tx_bytes: 0,
+            rx_bytes: 0,
         }
+    }
+
+    /// Return the baud rate of the current connection.
+    pub fn baud_rate(&self) -> u32 {
+        self.config.baud_rate
+    }
+
+    /// Return cumulative bytes transmitted.
+    pub fn tx_bytes(&self) -> u64 {
+        self.tx_bytes
+    }
+
+    /// Return cumulative bytes received.
+    pub fn rx_bytes(&self) -> u64 {
+        self.rx_bytes
     }
 
     /// Auto-discover the ID-52A Plus and connect.
@@ -80,6 +101,7 @@ impl Radio {
         trace!("TX: {:02X?}", bytes);
         self.port.write_all(&bytes).map_err(CivError::Io)?;
         self.port.flush().map_err(CivError::Io)?;
+        self.tx_bytes += bytes.len() as u64;
 
         // If echo-back is enabled, read and discard the echo first.
         if self.config.echo_back {
@@ -154,6 +176,7 @@ impl Radio {
             Ok(n) => {
                 trace!("read {} bytes: {:02X?}", n, &tmp[..n]);
                 self.buf.extend_from_slice(&tmp[..n]);
+                self.rx_bytes += n as u64;
                 Ok(())
             }
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(()),
@@ -242,6 +265,18 @@ impl Radio {
             Response::Ng => Err(CivError::Ng),
             other => {
                 warn!("unexpected response to SetLevel(AF): {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Set the squelch level (0–255).
+    pub fn set_squelch(&mut self, level: u16) -> Result<()> {
+        match self.send_command(&Command::SetLevel(level_sub::SQUELCH, level))? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to SetLevel(SQL): {:?}", other);
                 Err(CivError::InvalidFrame)
             }
         }

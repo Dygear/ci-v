@@ -7,6 +7,7 @@ pub mod port;
 pub mod protocol;
 pub mod radio;
 pub mod response;
+pub mod tui;
 
 pub use error::{CivError, Result};
 pub use frequency::Frequency;
