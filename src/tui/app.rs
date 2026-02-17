@@ -1,4 +1,5 @@
 use std::sync::mpsc as std_mpsc;
+use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -14,7 +15,6 @@ pub enum Focus {
     Mode,
     AfLevel,
     Squelch,
-    Vfo,
 }
 
 /// Current input mode.
@@ -71,9 +71,12 @@ pub struct App {
     pub radio_state: RadioState,
     pub input_mode: InputMode,
     pub connected: bool,
-    pub last_error: Option<String>,
+    pub error_log: Vec<(Instant, String)>,
     pub should_quit: bool,
     pub baud_rate: u32,
+
+    /// Currently selected VFO (tracked locally since CI-V has no read command for this).
+    pub current_vfo: Vfo,
 
     // Edit buffers
     pub freq_edit_hz: u64,
@@ -81,7 +84,6 @@ pub struct App {
     pub mode_edit: OperatingMode,
     pub af_edit: u16,
     pub sql_edit: u16,
-    pub vfo_edit: Vfo,
 
     /// When muted, stores the volume step to restore on unmute.
     pub mute_restore_step: Option<u16>,
@@ -95,15 +97,15 @@ impl App {
             radio_state: RadioState::default(),
             input_mode: InputMode::Normal,
             connected: false,
-            last_error: None,
+            error_log: Vec::new(),
             should_quit: false,
             baud_rate,
+            current_vfo: Vfo::A,
             freq_edit_hz: 145_000_000,
             freq_cursor: 0,
             mode_edit: OperatingMode::Fm,
             af_edit: 0,
             sql_edit: 0,
-            vfo_edit: Vfo::A,
             mute_restore_step: None,
             cmd_tx,
         }
@@ -122,10 +124,9 @@ impl App {
                     self.mute_restore_step = None;
                 }
                 self.radio_state = state;
-                self.last_error = None;
             }
             RadioEvent::Error(msg) => {
-                self.last_error = Some(msg);
+                self.error_log.push((Instant::now(), msg));
             }
             RadioEvent::Connected => {
                 self.connected = true;
@@ -157,7 +158,7 @@ impl App {
             KeyCode::Char('m') | KeyCode::Char('M') => self.enter_edit(Focus::Mode),
             KeyCode::Char('a') | KeyCode::Char('A') => self.enter_edit(Focus::AfLevel),
             KeyCode::Char('s') | KeyCode::Char('S') => self.enter_edit(Focus::Squelch),
-            KeyCode::Char('v') | KeyCode::Char('V') => self.enter_edit(Focus::Vfo),
+            KeyCode::Char('v') | KeyCode::Char('V') => self.toggle_vfo(),
             KeyCode::Char('+') | KeyCode::Char('=') => self.adjust_volume(1),
             KeyCode::Char('-') | KeyCode::Char('_') => self.adjust_volume(-1),
             KeyCode::Char('0') => self.toggle_mute(),
@@ -177,7 +178,6 @@ impl App {
                 | (KeyCode::Char('m') | KeyCode::Char('M'), Focus::Mode)
                 | (KeyCode::Char('a') | KeyCode::Char('A'), Focus::AfLevel)
                 | (KeyCode::Char('s') | KeyCode::Char('S'), Focus::Squelch)
-                | (KeyCode::Char('v') | KeyCode::Char('V'), Focus::Vfo)
         );
 
         match key.code {
@@ -196,7 +196,6 @@ impl App {
                 Focus::Mode => self.handle_mode_edit_key(key.code),
                 Focus::AfLevel => self.handle_volume_edit_key(key.code),
                 Focus::Squelch => self.handle_level_edit_key(key.code),
-                Focus::Vfo => self.handle_vfo_edit_key(key.code),
             },
         }
     }
@@ -220,9 +219,6 @@ impl App {
             Focus::Squelch => {
                 self.sql_edit = self.radio_state.squelch.unwrap_or(0);
             }
-            Focus::Vfo => {
-                self.vfo_edit = Vfo::A;
-            }
         }
         self.input_mode = InputMode::Editing(focus);
     }
@@ -239,7 +235,6 @@ impl App {
             Focus::Mode => RadioCommand::SetMode(self.mode_edit),
             Focus::AfLevel => RadioCommand::SetAfLevel(volume_step_to_raw(self.af_edit)),
             Focus::Squelch => RadioCommand::SetSquelch(self.sql_edit),
-            Focus::Vfo => RadioCommand::SelectVfo(self.vfo_edit),
         };
         let _ = self.cmd_tx.send(cmd);
     }
@@ -339,13 +334,10 @@ impl App {
         }
     }
 
-    fn handle_vfo_edit_key(&mut self, code: KeyCode) {
-        match code {
-            KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => {
-                self.vfo_edit = self.vfo_edit.toggle();
-            }
-            _ => {}
-        }
+    /// Toggle VFO A/B and send the command immediately.
+    fn toggle_vfo(&mut self) {
+        self.current_vfo = self.current_vfo.toggle();
+        let _ = self.cmd_tx.send(RadioCommand::SelectVfo(self.current_vfo));
     }
 
     /// Adjust volume by `delta` steps and send immediately. Clears mute state.

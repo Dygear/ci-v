@@ -45,13 +45,14 @@ pub mod meter_sub {
 }
 
 /// Sub-commands for the VFO_MODE (0x07) command.
+///
+/// The ID-52A Plus uses 0xD0/0xD1 for A/B band selection,
+/// not the 0x00/0x01 used by HF rigs.
 pub mod vfo_sub {
-    /// Select VFO A.
-    pub const VFO_A: u8 = 0x00;
-    /// Select VFO B.
-    pub const VFO_B: u8 = 0x01;
-    /// Exchange main/sub (A/B swap).
-    pub const EXCHANGE: u8 = 0xB0;
+    /// Select A band (single watch) / set MAIN band as A (dualwatch).
+    pub const VFO_A: u8 = 0xD0;
+    /// Select B band (single watch) / set MAIN band as B (dualwatch).
+    pub const VFO_B: u8 = 0xD1;
 }
 
 /// Sub-commands for the POWER (0x18) command.
@@ -73,12 +74,10 @@ pub enum Command {
     ReadMode,
     /// Set the operating mode and filter.
     SetMode(OperatingMode),
-    /// Select VFO A.
+    /// Select VFO/Band A.
     SelectVfoA,
-    /// Select VFO B.
+    /// Select VFO/Band B.
     SelectVfoB,
-    /// Exchange VFO A/B.
-    ExchangeVfo,
     /// Read a level setting. The `u8` is the level sub-command.
     ReadLevel(u8),
     /// Set a level setting. The `u8` is the level sub-command, `u16` is the value (0–255).
@@ -109,7 +108,6 @@ impl Command {
             }
             Command::SelectVfoA => Frame::new(cmd::VFO_MODE, Some(vfo_sub::VFO_A), vec![]),
             Command::SelectVfoB => Frame::new(cmd::VFO_MODE, Some(vfo_sub::VFO_B), vec![]),
-            Command::ExchangeVfo => Frame::new(cmd::VFO_MODE, Some(vfo_sub::EXCHANGE), vec![]),
             Command::ReadLevel(sub) => Frame::new(cmd::LEVEL, Some(*sub), vec![]),
             Command::SetLevel(sub, value) => {
                 let data = bcd::encode_bcd_be(*value as u64, 2)?;
@@ -130,7 +128,7 @@ impl Command {
             Command::SetFrequency(_) => cmd::SET_FREQ,
             Command::ReadMode => cmd::READ_MODE,
             Command::SetMode(_) => cmd::SET_MODE,
-            Command::SelectVfoA | Command::SelectVfoB | Command::ExchangeVfo => cmd::VFO_MODE,
+            Command::SelectVfoA | Command::SelectVfoB => cmd::VFO_MODE,
             Command::ReadLevel(_) | Command::SetLevel(_, _) => cmd::LEVEL,
             Command::ReadMeter(_) => cmd::METER,
             Command::PowerOn | Command::PowerOff => cmd::POWER,
@@ -147,7 +145,6 @@ impl Command {
             | Command::SetMode(_) => None,
             Command::SelectVfoA => Some(vfo_sub::VFO_A),
             Command::SelectVfoB => Some(vfo_sub::VFO_B),
-            Command::ExchangeVfo => Some(vfo_sub::EXCHANGE),
             Command::ReadLevel(sub) | Command::SetLevel(sub, _) => Some(*sub),
             Command::ReadMeter(sub) => Some(*sub),
             Command::PowerOn => Some(power_sub::ON),
@@ -175,7 +172,9 @@ mod tests {
         let bytes = frame.to_bytes();
         assert_eq!(
             bytes,
-            vec![0xFE, 0xFE, 0xB4, 0xE0, 0x05, 0x00, 0x00, 0x00, 0x45, 0x01, 0xFD]
+            vec![
+                0xFE, 0xFE, 0xB4, 0xE0, 0x05, 0x00, 0x00, 0x00, 0x45, 0x01, 0xFD
+            ]
         );
     }
 
@@ -197,7 +196,7 @@ mod tests {
     fn test_vfo_select_a() {
         let frame = Command::SelectVfoA.to_frame().unwrap();
         let bytes = frame.to_bytes();
-        assert_eq!(bytes, vec![0xFE, 0xFE, 0xB4, 0xE0, 0x07, 0x00, 0xFD]);
+        assert_eq!(bytes, vec![0xFE, 0xFE, 0xB4, 0xE0, 0x07, 0xD0, 0xFD]);
     }
 
     #[test]
@@ -209,7 +208,9 @@ mod tests {
 
     #[test]
     fn test_set_af_level() {
-        let frame = Command::SetLevel(level_sub::AF_LEVEL, 128).to_frame().unwrap();
+        let frame = Command::SetLevel(level_sub::AF_LEVEL, 128)
+            .to_frame()
+            .unwrap();
         let bytes = frame.to_bytes();
         assert_eq!(
             bytes,

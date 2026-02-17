@@ -99,16 +99,21 @@ impl Radio {
         self.port.flush().map_err(CivError::Io)?;
         self.tx_bytes += bytes.len() as u64;
 
-        // Read the actual response, skipping any echo-back frames.
-        let response_frame = self.read_response()?;
+        // Read the actual response, skipping echo-back and unsolicited frames.
+        let response_frame = self.read_response(command.command_byte())?;
         response::parse_response(&response_frame, command)
     }
 
     /// Read a response frame from the radio (addressed to the controller).
     ///
-    /// Transparently skips echo-back frames (addressed to the radio) so the
-    /// software works regardless of whether echo-back is ON or OFF.
-    fn read_response(&mut self) -> Result<Frame> {
+    /// Transparently skips:
+    /// - Echo-back frames (addressed to the radio, not the controller)
+    /// - Unsolicited transceive notifications (command byte doesn't match
+    ///   the expected response and isn't OK/NG)
+    ///
+    /// This ensures that when CI-V Transceive is ON, unsolicited frequency
+    /// or mode change notifications don't get mistaken for command responses.
+    fn read_response(&mut self, expected_cmd: u8) -> Result<Frame> {
         let deadline = Instant::now() + self.config.timeout;
 
         loop {
@@ -116,12 +121,23 @@ impl Radio {
 
             if let Some((frame, consumed)) = Frame::parse(&self.buf)? {
                 self.buf.drain(..consumed);
-                if frame.dst == self.config.controller_addr {
+
+                if frame.dst != self.config.controller_addr {
+                    // Skip echo-back frames (addressed to the radio, not to us).
+                    trace!("skipping echo frame: {:?}", frame);
+                    continue;
+                }
+
+                if frame.is_ok() || frame.is_ng() || frame.command == expected_cmd {
                     trace!("RX: {:?}", frame);
                     return Ok(frame);
                 }
-                // Skip echo-back frames (addressed to the radio, not to us).
-                trace!("skipping echo frame: {:?}", frame);
+
+                // Unsolicited transceive notification — skip it.
+                trace!(
+                    "skipping unsolicited frame (cmd {:02X}, expected {:02X}): {:?}",
+                    frame.command, expected_cmd, frame
+                );
             }
 
             if Instant::now() >= deadline {

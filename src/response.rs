@@ -1,5 +1,5 @@
 use crate::bcd;
-use crate::command::{cmd, Command};
+use crate::command::{Command, cmd};
 use crate::error::{CivError, Result};
 use crate::frequency::Frequency;
 use crate::mode::OperatingMode;
@@ -48,7 +48,7 @@ pub fn parse_response(frame: &Frame, command: &Command) -> Result<Response> {
         }
         Command::ReadMode => parse_mode_response(frame),
         Command::SetMode(_) => Ok(Response::Ok),
-        Command::SelectVfoA | Command::SelectVfoB | Command::ExchangeVfo => Ok(Response::Ok),
+        Command::SelectVfoA | Command::SelectVfoB => Ok(Response::Ok),
         Command::ReadLevel(sub) => parse_level_response(frame, *sub),
         Command::SetLevel(_, _) => Ok(Response::Ok),
         Command::ReadMeter(sub) => parse_meter_response(frame, *sub),
@@ -127,7 +127,7 @@ mod tests {
     use super::*;
     use crate::command::level_sub;
     use crate::command::meter_sub;
-    use crate::protocol::{ADDR_CONTROLLER, ADDR_ID52, OK, NG};
+    use crate::protocol::{ADDR_CONTROLLER, ADDR_ID52, NG, OK};
 
     fn make_response_frame(command: u8, sub_command: Option<u8>, data: Vec<u8>) -> Frame {
         Frame {
@@ -156,13 +156,12 @@ mod tests {
     #[test]
     fn test_parse_frequency() {
         // 145.000.000 Hz: BCD LE = 00 00 00 45 01
-        let frame = make_response_frame(
-            cmd::READ_FREQ,
-            Some(0x00),
-            vec![0x00, 0x00, 0x45, 0x01],
-        );
+        let frame = make_response_frame(cmd::READ_FREQ, Some(0x00), vec![0x00, 0x00, 0x45, 0x01]);
         let resp = parse_response(&frame, &Command::ReadFrequency).unwrap();
-        assert_eq!(resp, Response::Frequency(Frequency::from_hz(145_000_000).unwrap()));
+        assert_eq!(
+            resp,
+            Response::Frequency(Frequency::from_hz(145_000_000).unwrap())
+        );
     }
 
     #[test]
