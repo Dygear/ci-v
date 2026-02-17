@@ -4,8 +4,9 @@ use crate::frequency::Frequency;
 use crate::mode::OperatingMode;
 
 /// VFO selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Vfo {
+    #[default]
     A,
     B,
 }
@@ -17,12 +18,6 @@ impl Vfo {
             Self::A => Self::B,
             Self::B => Self::A,
         }
-    }
-}
-
-impl Default for Vfo {
-    fn default() -> Self {
-        Self::A
     }
 }
 

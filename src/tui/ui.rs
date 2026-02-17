@@ -273,7 +273,22 @@ fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> L
         spans.push(Span::styled(format!("{mode_str:<5}"), style));
     }
 
-    spans.push(Span::styled(format!(" {width_str:<6} "), style));
+    spans.push(Span::styled(" ", style));
+    let is_narrow = if editing_mode {
+        app.mode_edit.is_narrow()
+    } else {
+        state.mode.map(|m| m.is_narrow()).unwrap_or(false)
+    };
+    let width_color = if is_narrow {
+        Color::Green
+    } else {
+        Color::Yellow
+    };
+    spans.push(Span::styled(
+        format!("{width_str:<6}"),
+        Style::default().fg(width_color),
+    ));
+    spans.push(Span::styled(" ", style));
 
     let (power_str, power_color) = match power_level {
         Some(pl) => (pl.label(), power_level_color(pl)),
@@ -357,7 +372,7 @@ fn tx_tone_display(state: &VfoState) -> String {
                 None => "TPL   ---".to_string(),
             }
         }
-        0x06 | 0x07 | 0x08 => {
+        0x06..=0x08 => {
             // DPL on Tx
             let pol = match state.dtcs_tx_pol {
                 Some(0) => "+",
@@ -369,7 +384,7 @@ fn tx_tone_display(state: &VfoState) -> String {
                 None => format!("DPL {pol}---"),
             }
         }
-        0x02 | 0x03 | 0x04 | 0x05 => "CSQ".to_string(),
+        0x02..=0x05 => "CSQ".to_string(),
         _ => "---".to_string(),
     }
 }
@@ -470,7 +485,7 @@ fn format_offset_hz(hz: u64) -> String {
     let len = num_str.len();
     let mut grouped = String::new();
     for (i, ch) in num_str.chars().enumerate() {
-        if i > 0 && (len - i) % 3 == 0 {
+        if i > 0 && (len - i).is_multiple_of(3) {
             grouped.push(' ');
         }
         grouped.push(ch);
@@ -505,7 +520,7 @@ fn render_error_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn render_help(app: &App) -> Line<'static> {
     let help_text: String = match app.input_mode {
         InputMode::Normal => {
-            "  [Q]uit  [F]req  [M]ode  [V]FO  [A]F/Vol  [S]ql  [P]wr  [T]x Tone  [R]x Tone  +/- Vol  [0] Mute".to_string()
+            "  [Q]uit  [F]req  [M]ode  [W]idth  [V]FO  [A]F/Vol  [S]ql  [P]wr  [T]x Tone  [R]x Tone  +/- Vol  [0] Mute".to_string()
         }
         InputMode::Editing(Focus::Frequency) => {
             "  \u{2190}\u{2192} move cursor  \u{2191}\u{2193} change digit  0-9 type digit  Enter confirm  Esc cancel".to_string()

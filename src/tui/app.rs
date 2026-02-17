@@ -297,6 +297,7 @@ impl App {
             KeyCode::Char('t') | KeyCode::Char('T') => self.enter_edit(Focus::TxTone),
             KeyCode::Char('r') | KeyCode::Char('R') => self.enter_edit(Focus::RxTone),
             KeyCode::Char('p') | KeyCode::Char('P') => self.enter_edit(Focus::Power),
+            KeyCode::Char('w') | KeyCode::Char('W') => self.toggle_width(),
             KeyCode::Char('v') | KeyCode::Char('V') => self.toggle_vfo(),
             KeyCode::Char('+') | KeyCode::Char('=') => self.adjust_volume(1),
             KeyCode::Char('-') | KeyCode::Char('_') => self.adjust_volume(-1),
@@ -667,6 +668,16 @@ impl App {
         let _ = self.cmd_tx.send(RadioCommand::SelectVfo(self.current_vfo));
     }
 
+    /// Toggle channel width (wide ↔ narrow) and send immediately.
+    fn toggle_width(&mut self) {
+        if let Some(mode) = self.active_vfo_state().mode {
+            let new_mode = mode.toggle_width();
+            if new_mode != mode {
+                let _ = self.cmd_tx.send(RadioCommand::SetMode(new_mode));
+            }
+        }
+    }
+
     /// Adjust volume by `delta` steps and send immediately. Clears mute state.
     fn adjust_volume(&mut self, delta: i16) {
         let current = self
@@ -723,7 +734,7 @@ fn current_tone_type(tone_mode: u8, is_tx: bool) -> ToneType {
     if is_tx {
         match tone_mode {
             0x01 | 0x09 => ToneType::Tpl,
-            0x06 | 0x07 | 0x08 => ToneType::Dpl,
+            0x06..=0x08 => ToneType::Dpl,
             _ => ToneType::Csq,
         }
     } else {

@@ -52,6 +52,22 @@ impl OperatingMode {
             Self::Dv => (MODE_DV, FILTER_WIDE),
         }
     }
+
+    /// Toggle between wide and narrow variants. DV has no narrow variant and stays unchanged.
+    pub fn toggle_width(self) -> Self {
+        match self {
+            Self::Fm => Self::FmN,
+            Self::FmN => Self::Fm,
+            Self::Am => Self::AmN,
+            Self::AmN => Self::Am,
+            Self::Dv => Self::Dv,
+        }
+    }
+
+    /// Returns true if this is a narrow (12.5 kHz) mode.
+    pub fn is_narrow(self) -> bool {
+        matches!(self, Self::FmN | Self::AmN)
+    }
 }
 
 impl fmt::Display for OperatingMode {
