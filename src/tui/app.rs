@@ -312,7 +312,7 @@ impl App {
             should_quit: false,
             baud_rate,
             current_vfo: Vfo::A,
-            freq_edit_hz: 145_000_000,
+            freq_edit_hz: 146_520_000,
             freq_cursor: 0,
             mode_edit: OperatingMode::Fm,
             af_edit: 0,
