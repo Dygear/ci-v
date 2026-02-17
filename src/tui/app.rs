@@ -17,6 +17,7 @@ pub enum Focus {
     Squelch,
     TxTone,
     RxTone,
+    Power,
 }
 
 /// Tone type category for the first phase of tone editing.
@@ -62,6 +63,79 @@ pub const DTCS_CODES: &[u16] = &[
     503, 506, 516, 523, 526, 532, 546, 565, 606, 612, 624, 627, 631, 632, 654, 662, 664, 703, 712,
     723, 731, 732, 734, 743, 754,
 ];
+
+/// RF power level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PowerLevel {
+    SLow,
+    Low1,
+    Low2,
+    Mid,
+    High,
+}
+
+impl PowerLevel {
+    /// All levels in order from lowest to highest.
+    pub const ALL: [PowerLevel; 5] = [
+        PowerLevel::SLow,
+        PowerLevel::Low1,
+        PowerLevel::Low2,
+        PowerLevel::Mid,
+        PowerLevel::High,
+    ];
+
+    /// Raw CI-V value (midpoint of the range) for this power level.
+    pub fn to_raw(self) -> u16 {
+        match self {
+            Self::SLow => 0,
+            Self::Low1 => 76,
+            Self::Low2 => 127,
+            Self::Mid => 179,
+            Self::High => 255,
+        }
+    }
+
+    /// Determine power level from a raw CI-V value.
+    pub fn from_raw(raw: u16) -> Self {
+        match raw {
+            0..=50 => Self::SLow,
+            51..=101 => Self::Low1,
+            102..=153 => Self::Low2,
+            154..=204 => Self::Mid,
+            _ => Self::High,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SLow => "SLO",
+            Self::Low1 => "LO1",
+            Self::Low2 => "LO2",
+            Self::Mid => "MID",
+            Self::High => "MAX",
+        }
+    }
+
+    fn cycle_up(self) -> Self {
+        match self {
+            Self::SLow => Self::Low1,
+            Self::Low1 => Self::Low2,
+            Self::Low2 => Self::Mid,
+            Self::Mid => Self::High,
+            Self::High => Self::High,
+        }
+    }
+
+    fn cycle_down(self) -> Self {
+        match self {
+            Self::SLow => Self::SLow,
+            Self::Low1 => Self::SLow,
+            Self::Low2 => Self::Low1,
+            Self::Mid => Self::Low2,
+            Self::High => Self::Mid,
+        }
+    }
+}
 
 /// Current input mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,6 +208,9 @@ pub struct App {
     /// When muted, stores the volume step to restore on unmute.
     pub mute_restore_step: Option<u16>,
 
+    // Power edit state
+    pub power_edit: PowerLevel,
+
     // Tone edit state
     pub tone_edit_phase: ToneEditPhase,
     pub tone_type_edit: ToneType,
@@ -160,6 +237,7 @@ impl App {
             af_edit: 0,
             sql_edit: 0,
             mute_restore_step: None,
+            power_edit: PowerLevel::Mid,
             tone_edit_phase: ToneEditPhase::SelectType,
             tone_type_edit: ToneType::Csq,
             tone_freq_edit: 0,
@@ -218,6 +296,7 @@ impl App {
             KeyCode::Char('s') | KeyCode::Char('S') => self.enter_edit(Focus::Squelch),
             KeyCode::Char('t') | KeyCode::Char('T') => self.enter_edit(Focus::TxTone),
             KeyCode::Char('r') | KeyCode::Char('R') => self.enter_edit(Focus::RxTone),
+            KeyCode::Char('p') | KeyCode::Char('P') => self.enter_edit(Focus::Power),
             KeyCode::Char('v') | KeyCode::Char('V') => self.toggle_vfo(),
             KeyCode::Char('+') | KeyCode::Char('=') => self.adjust_volume(1),
             KeyCode::Char('-') | KeyCode::Char('_') => self.adjust_volume(-1),
@@ -240,6 +319,7 @@ impl App {
                 | (KeyCode::Char('s') | KeyCode::Char('S'), Focus::Squelch)
                 | (KeyCode::Char('t') | KeyCode::Char('T'), Focus::TxTone)
                 | (KeyCode::Char('r') | KeyCode::Char('R'), Focus::RxTone)
+                | (KeyCode::Char('p') | KeyCode::Char('P'), Focus::Power)
         );
 
         match key.code {
@@ -270,6 +350,7 @@ impl App {
                 Focus::AfLevel => self.handle_volume_edit_key(key.code),
                 Focus::Squelch => self.handle_level_edit_key(key.code),
                 Focus::TxTone | Focus::RxTone => self.handle_tone_edit_key(key.code),
+                Focus::Power => self.handle_power_edit_key(key.code),
             },
         }
     }
@@ -300,6 +381,13 @@ impl App {
             }
             Focus::Squelch => {
                 self.sql_edit = self.radio_state.squelch.unwrap_or(0);
+            }
+            Focus::Power => {
+                self.power_edit = self
+                    .active_vfo_state()
+                    .rf_power
+                    .map(PowerLevel::from_raw)
+                    .unwrap_or(PowerLevel::Mid);
             }
             Focus::TxTone | Focus::RxTone => {
                 self.tone_edit_phase = ToneEditPhase::SelectType;
@@ -343,6 +431,7 @@ impl App {
             Focus::Mode => RadioCommand::SetMode(self.mode_edit),
             Focus::AfLevel => RadioCommand::SetAfLevel(volume_step_to_raw(self.af_edit)),
             Focus::Squelch => RadioCommand::SetSquelch(self.sql_edit),
+            Focus::Power => RadioCommand::SetRfPower(self.power_edit.to_raw()),
             Focus::TxTone | Focus::RxTone => return, // handled by confirm_tone
         };
         let _ = self.cmd_tx.send(cmd);
@@ -438,6 +527,18 @@ impl App {
                 if self.sql_edit > 0 {
                     self.sql_edit -= 1;
                 }
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_power_edit_key(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Up | KeyCode::Right => {
+                self.power_edit = self.power_edit.cycle_up();
+            }
+            KeyCode::Down | KeyCode::Left => {
+                self.power_edit = self.power_edit.cycle_down();
             }
             _ => {}
         }

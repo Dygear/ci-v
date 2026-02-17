@@ -317,6 +317,18 @@ impl Radio {
         }
     }
 
+    /// Set the RF power level (0–255).
+    pub fn set_rf_power(&mut self, level: u16) -> Result<()> {
+        match self.send_command(&Command::SetLevel(level_sub::RF_POWER, level))? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to SetLevel(RF_POWER): {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
     /// Read a various function setting. Returns the raw byte value.
     pub fn read_various(&mut self, sub: u8) -> Result<u8> {
         match self.send_command(&Command::ReadVarious(sub))? {

@@ -4,7 +4,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use super::app::{self, App, CTCSS_TONES, DTCS_CODES, Focus, InputMode, ToneEditPhase, ToneType};
+use super::app::{
+    self, App, CTCSS_TONES, DTCS_CODES, Focus, InputMode, PowerLevel, ToneEditPhase, ToneType,
+};
 use super::message::{Vfo, VfoState};
 
 pub fn draw(frame: &mut Frame, app: &App) {
@@ -176,6 +178,7 @@ fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> L
     let editing_mode = is_selected && app.input_mode == InputMode::Editing(Focus::Mode);
     let editing_tx_tone = is_selected && app.input_mode == InputMode::Editing(Focus::TxTone);
     let editing_rx_tone = is_selected && app.input_mode == InputMode::Editing(Focus::RxTone);
+    let editing_power = is_selected && app.input_mode == InputMode::Editing(Focus::Power);
 
     // VFO label.
     let label = format!(" {vfo} ");
@@ -208,7 +211,11 @@ fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> L
     };
 
     // RF Power.
-    let power_str = state.rf_power.map(rf_power_label).unwrap_or("----");
+    let power_level = if editing_power {
+        Some(app.power_edit)
+    } else {
+        state.rf_power.map(PowerLevel::from_raw)
+    };
 
     // Tone labels with data.
     let tx_tone = if editing_tx_tone {
@@ -266,10 +273,23 @@ fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> L
         spans.push(Span::styled(format!("{mode_str:<5}"), style));
     }
 
-    spans.push(Span::styled(
-        format!(" {width_str:<6} {power_str:<4}  Tx:"),
-        style,
-    ));
+    spans.push(Span::styled(format!(" {width_str:<6} "), style));
+
+    let (power_str, power_color) = match power_level {
+        Some(pl) => (pl.label(), power_level_color(pl)),
+        None => ("---", Color::White),
+    };
+    let power_style = if editing_power {
+        Style::default()
+            .fg(Color::Black)
+            .bg(power_color)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(power_color)
+    };
+    spans.push(Span::styled(format!("{power_str:<3}"), power_style));
+
+    spans.push(Span::styled("  Tx:", style));
 
     let tx_tone_style = if editing_tx_tone {
         Style::default()
@@ -312,13 +332,13 @@ fn mode_width(mode: &crate::mode::OperatingMode) -> &'static str {
     }
 }
 
-fn rf_power_label(raw: u16) -> &'static str {
-    match raw {
-        0..=50 => "SLow",
-        51..=101 => "Low1",
-        102..=153 => "Low2",
-        154..=204 => "Mid",
-        _ => "High",
+fn power_level_color(level: PowerLevel) -> Color {
+    match level {
+        PowerLevel::SLow => Color::Cyan,
+        PowerLevel::Low1 => Color::Blue,
+        PowerLevel::Low2 => Color::Green,
+        PowerLevel::Mid => Color::Yellow,
+        PowerLevel::High => Color::Red,
     }
 }
 
@@ -485,7 +505,7 @@ fn render_error_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn render_help(app: &App) -> Line<'static> {
     let help_text: String = match app.input_mode {
         InputMode::Normal => {
-            "  [Q]uit  [F]req  [M]ode  [V]FO  [A]F/Vol  [S]ql  [T]x Tone  [R]x Tone  +/- Vol  [0] Mute".to_string()
+            "  [Q]uit  [F]req  [M]ode  [V]FO  [A]F/Vol  [S]ql  [P]wr  [T]x Tone  [R]x Tone  +/- Vol  [0] Mute".to_string()
         }
         InputMode::Editing(Focus::Frequency) => {
             "  \u{2190}\u{2192} move cursor  \u{2191}\u{2193} change digit  0-9 type digit  Enter confirm  Esc cancel".to_string()
@@ -495,6 +515,9 @@ fn render_help(app: &App) -> Line<'static> {
         }
         InputMode::Editing(Focus::AfLevel) | InputMode::Editing(Focus::Squelch) => {
             "  \u{2191}\u{2193} adjust level  Enter confirm  Esc cancel".to_string()
+        }
+        InputMode::Editing(Focus::Power) => {
+            format!("  \u{2190}\u{2192} [{}]  Enter confirm  Esc cancel", app.power_edit.label())
         }
         InputMode::Editing(Focus::TxTone) | InputMode::Editing(Focus::RxTone) => {
             match app.tone_edit_phase {
