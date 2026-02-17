@@ -27,13 +27,12 @@ pub fn find_id52_port() -> Result<String> {
 
     for port in &ports {
         debug!("found port: {} ({:?})", port.port_name, port.port_type);
-        if let SerialPortType::UsbPort(usb_info) = &port.port_type {
-            if let Some(product) = &usb_info.product {
-                if product.contains(ID52_PRODUCT) {
-                    info!("found ID-52A Plus on {}", port.port_name);
-                    return Ok(port.port_name.clone());
-                }
-            }
+        if let SerialPortType::UsbPort(usb_info) = &port.port_type
+            && let Some(product) = &usb_info.product
+            && product.contains(ID52_PRODUCT)
+        {
+            info!("found ID-52A Plus on {}", port.port_name);
+            return Ok(port.port_name.clone());
         }
     }
 
@@ -68,9 +67,7 @@ pub fn open_port(port_name: &str, baud_rate: u32) -> Result<Box<dyn serialport::
 /// at each candidate rate and checking for a valid response.
 ///
 /// Returns the working baud rate and open port on success.
-pub fn auto_detect_baud(
-    port_name: &str,
-) -> Result<(u32, Box<dyn serialport::SerialPort>)> {
+pub fn auto_detect_baud(port_name: &str) -> Result<(u32, Box<dyn serialport::SerialPort>)> {
     let cmd_frame = Command::ReadTransceiverId.to_frame()?;
     let cmd_bytes = cmd_frame.to_bytes();
 

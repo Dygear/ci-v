@@ -115,12 +115,11 @@ impl App {
             RadioEvent::StateUpdate(state) => {
                 // If muted but the radio reports a non-zero volume (user changed
                 // it on the device), clear the mute state.
-                if self.mute_restore_step.is_some() {
-                    if let Some(raw) = state.af_level {
-                        if raw_to_volume_step(raw) != 0 {
-                            self.mute_restore_step = None;
-                        }
-                    }
+                if self.mute_restore_step.is_some()
+                    && let Some(raw) = state.af_level
+                    && raw_to_volume_step(raw) != 0
+                {
+                    self.mute_restore_step = None;
                 }
                 self.radio_state = state;
                 self.last_error = None;
@@ -287,10 +286,17 @@ impl App {
     }
 
     fn handle_mode_edit_key(&mut self, code: KeyCode) {
-        let idx = MODE_CYCLE.iter().position(|m| *m == self.mode_edit).unwrap_or(0);
+        let idx = MODE_CYCLE
+            .iter()
+            .position(|m| *m == self.mode_edit)
+            .unwrap_or(0);
         match code {
             KeyCode::Left | KeyCode::Up => {
-                let new_idx = if idx == 0 { MODE_CYCLE.len() - 1 } else { idx - 1 };
+                let new_idx = if idx == 0 {
+                    MODE_CYCLE.len() - 1
+                } else {
+                    idx - 1
+                };
                 self.mode_edit = MODE_CYCLE[new_idx];
             }
             KeyCode::Right | KeyCode::Down => {
@@ -351,7 +357,9 @@ impl App {
             .unwrap_or(0);
         let new_step = (current as i16 + delta).clamp(0, VOLUME_MAX_STEP as i16) as u16;
         self.mute_restore_step = None;
-        let _ = self.cmd_tx.send(RadioCommand::SetAfLevel(volume_step_to_raw(new_step)));
+        let _ = self
+            .cmd_tx
+            .send(RadioCommand::SetAfLevel(volume_step_to_raw(new_step)));
     }
 
     /// Toggle mute. Muting saves the current step and sets volume to 0.
@@ -359,7 +367,9 @@ impl App {
     fn toggle_mute(&mut self) {
         if let Some(restore) = self.mute_restore_step.take() {
             // Unmute: restore previous volume.
-            let _ = self.cmd_tx.send(RadioCommand::SetAfLevel(volume_step_to_raw(restore)));
+            let _ = self
+                .cmd_tx
+                .send(RadioCommand::SetAfLevel(volume_step_to_raw(restore)));
         } else {
             // Mute: save current volume, set to 0.
             let current = self
@@ -368,7 +378,9 @@ impl App {
                 .map(raw_to_volume_step)
                 .unwrap_or(0);
             self.mute_restore_step = Some(current);
-            let _ = self.cmd_tx.send(RadioCommand::SetAfLevel(volume_step_to_raw(0)));
+            let _ = self
+                .cmd_tx
+                .send(RadioCommand::SetAfLevel(volume_step_to_raw(0)));
         }
     }
 
