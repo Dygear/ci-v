@@ -313,7 +313,7 @@ fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> L
     } else {
         style
     };
-    spans.push(Span::styled(format!("{tx_tone:<9}"), tx_tone_style));
+    spans.push(Span::styled(format!("{tx_tone:<11}"), tx_tone_style));
 
     spans.push(Span::styled(" Rx:", style));
 
@@ -324,7 +324,7 @@ fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> L
     } else {
         style
     };
-    spans.push(Span::styled(format!("{rx_tone:<9}"), rx_tone_style));
+    spans.push(Span::styled(format!("{rx_tone:<11}"), rx_tone_style));
 
     spans.push(Span::styled(" ", style));
     spans.extend(duplex_spans);
@@ -368,8 +368,8 @@ fn tx_tone_display(state: &VfoState) -> String {
         0x01 | 0x09 => {
             // TPL on Tx
             match state.tx_tone_freq {
-                Some(f) => format!("TPL {:>5}", format_tone_freq(f)),
-                None => "TPL   ---".to_string(),
+                Some(f) => format!("TSQL  {:>5}", format_tone_freq(f)),
+                None => "TSQL  ---".to_string(),
             }
         }
         0x06..=0x08 => {
@@ -380,8 +380,8 @@ fn tx_tone_display(state: &VfoState) -> String {
                 None => "?",
             };
             match state.dtcs_code {
-                Some(c) => format!("DPL {pol}{c:03}"),
-                None => format!("DPL {pol}---"),
+                Some(c) => format!("DTCS  {pol}{c:03}"),
+                None => format!("DTCS  {pol}---"),
             }
         }
         0x02..=0x05 => "CSQ".to_string(),
@@ -400,8 +400,8 @@ fn rx_tone_display(state: &VfoState) -> String {
         0x02 | 0x04 | 0x08 | 0x09 => {
             // TPL on Rx
             match state.rx_tone_freq {
-                Some(f) => format!("TPL {:>5}", format_tone_freq(f)),
-                None => "TPL   ---".to_string(),
+                Some(f) => format!("TSQL  {:>5}", format_tone_freq(f)),
+                None => "TSQL  ---".to_string(),
             }
         }
         0x03 | 0x05 | 0x07 => {
@@ -412,8 +412,8 @@ fn rx_tone_display(state: &VfoState) -> String {
                 None => "?",
             };
             match state.dtcs_code {
-                Some(c) => format!("DPL {pol}{c:03}"),
-                None => format!("DPL {pol}---"),
+                Some(c) => format!("DTCS  {pol}{c:03}"),
+                None => format!("DTCS  {pol}---"),
             }
         }
         _ => "---".to_string(),
@@ -433,12 +433,12 @@ fn tone_edit_display(app: &App) -> String {
             ToneType::Csq => "CSQ".to_string(),
             ToneType::Tpl => {
                 let freq = CTCSS_TONES[app.tone_freq_edit];
-                format!("TPL {:>5}", format_tone_freq(freq))
+                format!("TSQL  {:>5}", format_tone_freq(freq))
             }
             ToneType::Dpl => {
                 let code = DTCS_CODES[app.dtcs_code_edit];
                 let pol = if app.dtcs_pol_edit { "-" } else { "+" };
-                format!("DPL {pol}{code:03}")
+                format!("DTCS  {pol}{code:03}")
             }
         },
     }

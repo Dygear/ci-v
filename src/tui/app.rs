@@ -32,8 +32,8 @@ impl std::fmt::Display for ToneType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Csq => write!(f, "CSQ"),
-            Self::Tpl => write!(f, "TPL"),
-            Self::Dpl => write!(f, "DPL"),
+            Self::Tpl => write!(f, "TSQL"),
+            Self::Dpl => write!(f, "DTCS"),
         }
     }
 }
