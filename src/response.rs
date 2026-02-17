@@ -166,22 +166,27 @@ fn parse_duplex_response(frame: &Frame) -> Result<Response> {
 
 /// Parse a duplex offset frequency response frame.
 ///
-/// Same 5-byte LE BCD format as the operating frequency.
+/// 3-byte LE BCD format (100 Hz resolution):
+///   byte 0: (1 kHz)(100 Hz)
+///   byte 1: (100 kHz)(10 kHz)
+///   byte 2: (10 MHz)(1 MHz)
+///
+/// Decoded via standard LE BCD, then multiplied by 100 to get Hz.
 fn parse_offset_response(frame: &Frame) -> Result<Response> {
-    // Reuse the same logic as frequency parsing.
-    let mut freq_bytes = Vec::with_capacity(5);
+    let mut offset_bytes = Vec::with_capacity(3);
     if let Some(sc) = frame.sub_command {
-        freq_bytes.push(sc);
+        offset_bytes.push(sc);
     }
-    freq_bytes.extend_from_slice(&frame.data);
+    offset_bytes.extend_from_slice(&frame.data);
 
-    if freq_bytes.len() != 5 {
+    if offset_bytes.len() != 3 {
         return Err(CivError::InvalidFrame);
     }
 
-    let mut arr = [0u8; 5];
-    arr.copy_from_slice(&freq_bytes);
-    let freq = Frequency::from_civ_bytes(arr)?;
+    // LE BCD decode gives units of 100 Hz (the smallest digit pair).
+    let raw = bcd::decode_bcd_le(&offset_bytes)?;
+    let hz = raw * 100;
+    let freq = Frequency::from_hz(hz)?;
     Ok(Response::Offset(freq))
 }
 
@@ -349,16 +354,20 @@ mod tests {
 
     #[test]
     fn test_parse_offset() {
-        // 600 kHz = 600,000 Hz → BCD LE: [0x00, 0x00, 0x60, 0x00, 0x00]
-        let frame = make_response_frame(cmd::READ_OFFSET, Some(0x00), vec![0x00, 0x60, 0x00, 0x00]);
+        // 600 kHz = 600,000 Hz. Raw in 100 Hz units = 6000.
+        // 3-byte LE BCD: [0x00, 0x60, 0x00]
+        // Frame: sub_command=0x00, data=[0x60, 0x00]
+        let frame = make_response_frame(cmd::READ_OFFSET, Some(0x00), vec![0x60, 0x00]);
         let resp = parse_response(&frame, &Command::ReadOffset).unwrap();
         assert_eq!(resp, Response::Offset(Frequency::from_hz(600_000).unwrap()));
     }
 
     #[test]
     fn test_parse_offset_5mhz() {
-        // 5 MHz = 5,000,000 Hz → BCD LE: [0x00, 0x00, 0x00, 0x05, 0x00]
-        let frame = make_response_frame(cmd::READ_OFFSET, Some(0x00), vec![0x00, 0x00, 0x05, 0x00]);
+        // 5 MHz = 5,000,000 Hz. Raw in 100 Hz units = 50000.
+        // 3-byte LE BCD: [0x00, 0x00, 0x05]
+        // Frame: sub_command=0x00, data=[0x00, 0x05]
+        let frame = make_response_frame(cmd::READ_OFFSET, Some(0x00), vec![0x00, 0x05]);
         let resp = parse_response(&frame, &Command::ReadOffset).unwrap();
         assert_eq!(
             resp,

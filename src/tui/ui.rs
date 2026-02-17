@@ -165,11 +165,12 @@ fn render_compact_meter(
 }
 
 fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> Line<'static> {
-    let style = if is_selected {
+    let label_style = if is_selected {
         Style::default().fg(Color::Black).bg(Color::White)
     } else {
         Style::default()
     };
+    let style = Style::default();
 
     let editing_freq = is_selected && app.input_mode == InputMode::Editing(Focus::Frequency);
     let editing_mode = is_selected && app.input_mode == InputMode::Editing(Focus::Mode);
@@ -222,12 +223,15 @@ fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> L
     };
 
     // Duplex + offset.
-    let duplex_str = duplex_display(state);
+    let duplex_spans = duplex_spans(state, style);
 
     // Build spans — if editing freq or mode, highlight those parts.
     let mut spans: Vec<Span<'static>> = Vec::new();
 
-    spans.push(Span::styled(label, style.add_modifier(Modifier::BOLD)));
+    spans.push(Span::styled(
+        label,
+        label_style.add_modifier(Modifier::BOLD),
+    ));
 
     if editing_freq {
         // Render frequency with cursor.
@@ -287,13 +291,8 @@ fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> L
     };
     spans.push(Span::styled(format!("{rx_tone:<9}"), rx_tone_style));
 
-    spans.push(Span::styled(format!(" {duplex_str}"), style));
-
-    // Pad the rest of the line with the selected style background.
-    if is_selected {
-        // Fill remaining width with spaces in the selected style.
-        spans.push(Span::styled(" ".repeat(20), style));
-    }
+    spans.push(Span::styled(" ", style));
+    spans.extend(duplex_spans);
 
     Line::from(spans)
 }
@@ -410,27 +409,54 @@ fn tone_edit_display(app: &App) -> String {
     }
 }
 
-/// Format duplex direction and offset.
-fn duplex_display(state: &VfoState) -> String {
+/// Format duplex direction and offset as colored spans.
+///
+/// Simplex → plain "Simplex".
+/// DUP+   → yellow "+ " followed by right-aligned offset in Hz with digit grouping.
+/// DUP-   → cyan  "- " followed by right-aligned offset in Hz with digit grouping.
+///
+/// Offset format: `+  5 000 000` (10 chars for the number, space-grouped).
+fn duplex_spans(state: &VfoState, base_style: Style) -> Vec<Span<'static>> {
     match state.duplex {
-        Some(0x10) => "Simplex".to_string(),
-        Some(0x11) => {
-            let offset = state
+        Some(0x10) => vec![Span::styled("Simplex", base_style)],
+        Some(dir @ (0x11 | 0x12)) => {
+            let (sign, color) = if dir == 0x12 {
+                ("+", Color::Yellow)
+            } else {
+                ("-", Color::Cyan)
+            };
+            let offset_str = state
                 .offset
-                .map(|f| format_frequency(f.hz()))
-                .unwrap_or_else(|| "---".to_string());
-            format!("DUP- {offset}")
+                .map(|f| format_offset_hz(f.hz()))
+                .unwrap_or_else(|| "        ---".to_string());
+            let style = base_style.fg(color);
+            vec![
+                Span::styled(format!("{sign} "), style),
+                Span::styled(offset_str, style),
+            ]
         }
-        Some(0x12) => {
-            let offset = state
-                .offset
-                .map(|f| format_frequency(f.hz()))
-                .unwrap_or_else(|| "---".to_string());
-            format!("DUP+ {offset}")
-        }
-        Some(_) => "---".to_string(),
-        None => "---".to_string(),
+        _ => vec![Span::styled("---", base_style)],
     }
+}
+
+/// Format an offset in Hz with space-separated digit groups, right-aligned to 10 chars.
+///
+/// Examples:
+///   600_000   → "    600 000"
+///   5_000_000 → "  5 000 000"
+fn format_offset_hz(hz: u64) -> String {
+    // Format the number with space-separated groups of 3 digits.
+    let num_str = hz.to_string();
+    let len = num_str.len();
+    let mut grouped = String::new();
+    for (i, ch) in num_str.chars().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            grouped.push(' ');
+        }
+        grouped.push(ch);
+    }
+    // Right-align to 11 chars (enough for "99 999 999" with spaces).
+    format!("{grouped:>11}")
 }
 
 fn render_error_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
