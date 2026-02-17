@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::frequency::Frequency;
 use crate::mode::OperatingMode;
 
-use super::message::{RadioCommand, RadioEvent, RadioState, Vfo};
+use super::message::{RadioCommand, RadioEvent, RadioState, Vfo, VfoState};
 
 /// Which field is focused for editing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -15,7 +15,53 @@ pub enum Focus {
     Mode,
     AfLevel,
     Squelch,
+    TxTone,
+    RxTone,
 }
+
+/// Tone type category for the first phase of tone editing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToneType {
+    Csq,
+    Tpl,
+    Dpl,
+}
+
+impl std::fmt::Display for ToneType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Csq => write!(f, "CSQ"),
+            Self::Tpl => write!(f, "TPL"),
+            Self::Dpl => write!(f, "DPL"),
+        }
+    }
+}
+
+/// Editing phase for tone selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToneEditPhase {
+    /// Selecting between CSQ / TPL / DPL.
+    SelectType,
+    /// Selecting the specific tone freq or DTCS code.
+    SelectValue,
+}
+
+/// Standard CTCSS tones in tenths of Hz.
+pub const CTCSS_TONES: &[u16] = &[
+    670, 693, 719, 744, 770, 797, 825, 854, 885, 915, 948, 974, 1000, 1035, 1072, 1109, 1148, 1188,
+    1230, 1273, 1318, 1365, 1413, 1462, 1514, 1567, 1622, 1679, 1738, 1799, 1862, 1928, 2035, 2065,
+    2107, 2181, 2257, 2291, 2336, 2418, 2503, 2541,
+];
+
+/// Standard DTCS codes.
+pub const DTCS_CODES: &[u16] = &[
+    23, 25, 26, 31, 32, 36, 43, 47, 51, 53, 54, 65, 71, 72, 73, 74, 114, 115, 116, 122, 125, 131,
+    132, 134, 143, 145, 152, 155, 156, 162, 165, 172, 174, 205, 212, 223, 225, 226, 243, 244, 245,
+    246, 251, 252, 255, 261, 263, 265, 266, 271, 274, 306, 311, 315, 325, 331, 332, 343, 346, 351,
+    356, 364, 365, 371, 411, 412, 413, 423, 431, 432, 445, 446, 452, 454, 455, 462, 464, 465, 466,
+    503, 506, 516, 523, 526, 532, 546, 565, 606, 612, 624, 627, 631, 632, 654, 662, 664, 703, 712,
+    723, 731, 732, 734, 743, 754,
+];
 
 /// Current input mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +134,13 @@ pub struct App {
     /// When muted, stores the volume step to restore on unmute.
     pub mute_restore_step: Option<u16>,
 
+    // Tone edit state
+    pub tone_edit_phase: ToneEditPhase,
+    pub tone_type_edit: ToneType,
+    pub tone_freq_edit: usize,
+    pub dtcs_code_edit: usize,
+    pub dtcs_pol_edit: bool,
+
     cmd_tx: std_mpsc::Sender<RadioCommand>,
 }
 
@@ -107,6 +160,11 @@ impl App {
             af_edit: 0,
             sql_edit: 0,
             mute_restore_step: None,
+            tone_edit_phase: ToneEditPhase::SelectType,
+            tone_type_edit: ToneType::Csq,
+            tone_freq_edit: 0,
+            dtcs_code_edit: 0,
+            dtcs_pol_edit: false,
             cmd_tx,
         }
     }
@@ -158,6 +216,8 @@ impl App {
             KeyCode::Char('m') | KeyCode::Char('M') => self.enter_edit(Focus::Mode),
             KeyCode::Char('a') | KeyCode::Char('A') => self.enter_edit(Focus::AfLevel),
             KeyCode::Char('s') | KeyCode::Char('S') => self.enter_edit(Focus::Squelch),
+            KeyCode::Char('t') | KeyCode::Char('T') => self.enter_edit(Focus::TxTone),
+            KeyCode::Char('r') | KeyCode::Char('R') => self.enter_edit(Focus::RxTone),
             KeyCode::Char('v') | KeyCode::Char('V') => self.toggle_vfo(),
             KeyCode::Char('+') | KeyCode::Char('=') => self.adjust_volume(1),
             KeyCode::Char('-') | KeyCode::Char('_') => self.adjust_volume(-1),
@@ -178,6 +238,8 @@ impl App {
                 | (KeyCode::Char('m') | KeyCode::Char('M'), Focus::Mode)
                 | (KeyCode::Char('a') | KeyCode::Char('A'), Focus::AfLevel)
                 | (KeyCode::Char('s') | KeyCode::Char('S'), Focus::Squelch)
+                | (KeyCode::Char('t') | KeyCode::Char('T'), Focus::TxTone)
+                | (KeyCode::Char('r') | KeyCode::Char('R'), Focus::RxTone)
         );
 
         match key.code {
@@ -185,18 +247,38 @@ impl App {
                 self.input_mode = InputMode::Normal;
             }
             KeyCode::Esc => {
-                self.input_mode = InputMode::Normal;
+                // For tone editing, Esc in SelectValue goes back to SelectType.
+                if matches!(focus, Focus::TxTone | Focus::RxTone)
+                    && self.tone_edit_phase == ToneEditPhase::SelectValue
+                {
+                    self.tone_edit_phase = ToneEditPhase::SelectType;
+                } else {
+                    self.input_mode = InputMode::Normal;
+                }
             }
             KeyCode::Enter => {
-                self.confirm_edit(focus);
-                self.input_mode = InputMode::Normal;
+                if matches!(focus, Focus::TxTone | Focus::RxTone) {
+                    self.handle_tone_enter(focus);
+                } else {
+                    self.confirm_edit(focus);
+                    self.input_mode = InputMode::Normal;
+                }
             }
             _ => match focus {
                 Focus::Frequency => self.handle_freq_edit_key(key.code),
                 Focus::Mode => self.handle_mode_edit_key(key.code),
                 Focus::AfLevel => self.handle_volume_edit_key(key.code),
                 Focus::Squelch => self.handle_level_edit_key(key.code),
+                Focus::TxTone | Focus::RxTone => self.handle_tone_edit_key(key.code),
             },
+        }
+    }
+
+    /// Get the VfoState for the currently active VFO.
+    pub fn active_vfo_state(&self) -> &VfoState {
+        match self.current_vfo {
+            Vfo::A => &self.radio_state.vfo_a,
+            Vfo::B => &self.radio_state.vfo_b,
         }
     }
 
@@ -204,20 +286,46 @@ impl App {
         match focus {
             Focus::Frequency => {
                 self.freq_edit_hz = self
-                    .radio_state
+                    .active_vfo_state()
                     .frequency
                     .map(|f| f.hz())
                     .unwrap_or(145_000_000);
                 self.freq_cursor = 0;
             }
             Focus::Mode => {
-                self.mode_edit = self.radio_state.mode.unwrap_or(OperatingMode::Fm);
+                self.mode_edit = self.active_vfo_state().mode.unwrap_or(OperatingMode::Fm);
             }
             Focus::AfLevel => {
                 self.af_edit = raw_to_volume_step(self.radio_state.af_level.unwrap_or(3));
             }
             Focus::Squelch => {
                 self.sql_edit = self.radio_state.squelch.unwrap_or(0);
+            }
+            Focus::TxTone | Focus::RxTone => {
+                self.tone_edit_phase = ToneEditPhase::SelectType;
+                let is_tx = focus == Focus::TxTone;
+                // Copy values out of the borrow before mutating self.
+                let state = self.active_vfo_state();
+                let tone_mode = state.tone_mode.unwrap_or(0x00);
+                let tx_freq = state.tx_tone_freq;
+                let rx_freq = state.rx_tone_freq;
+                let dtcs_code = state.dtcs_code;
+                let dtcs_tx_pol = state.dtcs_tx_pol.unwrap_or(0);
+                let dtcs_rx_pol = state.dtcs_rx_pol.unwrap_or(0);
+                // Now mutate self freely.
+                self.tone_type_edit = current_tone_type(tone_mode, is_tx);
+                let tone_freq = if is_tx { tx_freq } else { rx_freq };
+                self.tone_freq_edit = tone_freq
+                    .and_then(|f| CTCSS_TONES.iter().position(|&t| t == f))
+                    .unwrap_or(0);
+                self.dtcs_code_edit = dtcs_code
+                    .and_then(|c| DTCS_CODES.iter().position(|&d| d == c))
+                    .unwrap_or(0);
+                self.dtcs_pol_edit = if is_tx {
+                    dtcs_tx_pol != 0
+                } else {
+                    dtcs_rx_pol != 0
+                };
             }
         }
         self.input_mode = InputMode::Editing(focus);
@@ -235,6 +343,7 @@ impl App {
             Focus::Mode => RadioCommand::SetMode(self.mode_edit),
             Focus::AfLevel => RadioCommand::SetAfLevel(volume_step_to_raw(self.af_edit)),
             Focus::Squelch => RadioCommand::SetSquelch(self.sql_edit),
+            Focus::TxTone | Focus::RxTone => return, // handled by confirm_tone
         };
         let _ = self.cmd_tx.send(cmd);
     }
@@ -334,6 +443,123 @@ impl App {
         }
     }
 
+    fn handle_tone_edit_key(&mut self, code: KeyCode) {
+        match self.tone_edit_phase {
+            ToneEditPhase::SelectType => match code {
+                KeyCode::Left => {
+                    self.tone_type_edit = match self.tone_type_edit {
+                        ToneType::Csq => ToneType::Dpl,
+                        ToneType::Tpl => ToneType::Csq,
+                        ToneType::Dpl => ToneType::Tpl,
+                    };
+                }
+                KeyCode::Right => {
+                    self.tone_type_edit = match self.tone_type_edit {
+                        ToneType::Csq => ToneType::Tpl,
+                        ToneType::Tpl => ToneType::Dpl,
+                        ToneType::Dpl => ToneType::Csq,
+                    };
+                }
+                _ => {}
+            },
+            ToneEditPhase::SelectValue => match self.tone_type_edit {
+                ToneType::Tpl => match code {
+                    KeyCode::Up => {
+                        if self.tone_freq_edit > 0 {
+                            self.tone_freq_edit -= 1;
+                        }
+                    }
+                    KeyCode::Down => {
+                        if self.tone_freq_edit < CTCSS_TONES.len() - 1 {
+                            self.tone_freq_edit += 1;
+                        }
+                    }
+                    _ => {}
+                },
+                ToneType::Dpl => match code {
+                    KeyCode::Up => {
+                        if self.dtcs_code_edit > 0 {
+                            self.dtcs_code_edit -= 1;
+                        }
+                    }
+                    KeyCode::Down => {
+                        if self.dtcs_code_edit < DTCS_CODES.len() - 1 {
+                            self.dtcs_code_edit += 1;
+                        }
+                    }
+                    KeyCode::Left | KeyCode::Right => {
+                        self.dtcs_pol_edit = !self.dtcs_pol_edit;
+                    }
+                    _ => {}
+                },
+                ToneType::Csq => {}
+            },
+        }
+    }
+
+    fn handle_tone_enter(&mut self, focus: Focus) {
+        match self.tone_edit_phase {
+            ToneEditPhase::SelectType => {
+                if self.tone_type_edit == ToneType::Csq {
+                    // CSQ: set tone mode and done.
+                    self.confirm_tone(focus);
+                    self.input_mode = InputMode::Normal;
+                } else {
+                    // TPL or DPL: advance to value selection.
+                    self.tone_edit_phase = ToneEditPhase::SelectValue;
+                }
+            }
+            ToneEditPhase::SelectValue => {
+                self.confirm_tone(focus);
+                self.input_mode = InputMode::Normal;
+            }
+        }
+    }
+
+    fn confirm_tone(&mut self, focus: Focus) {
+        let is_tx = focus == Focus::TxTone;
+        let state = self.active_vfo_state();
+        let current_tone_mode = state.tone_mode.unwrap_or(0x00);
+        let current_tx_pol = state.dtcs_tx_pol.unwrap_or(0);
+        let current_rx_pol = state.dtcs_rx_pol.unwrap_or(0);
+
+        match self.tone_type_edit {
+            ToneType::Csq => {
+                // Determine the new tone_mode based on what the *other* side is doing.
+                let new_mode = compute_tone_mode(current_tone_mode, is_tx, ToneType::Csq);
+                let _ = self.cmd_tx.send(RadioCommand::SetToneMode(new_mode));
+            }
+            ToneType::Tpl => {
+                let freq = CTCSS_TONES[self.tone_freq_edit];
+                // Set the tone frequency first.
+                if is_tx {
+                    let _ = self.cmd_tx.send(RadioCommand::SetTxTone(freq));
+                } else {
+                    let _ = self.cmd_tx.send(RadioCommand::SetRxTone(freq));
+                }
+                // Then set the tone mode.
+                let new_mode = compute_tone_mode(current_tone_mode, is_tx, ToneType::Tpl);
+                let _ = self.cmd_tx.send(RadioCommand::SetToneMode(new_mode));
+            }
+            ToneType::Dpl => {
+                let code = DTCS_CODES[self.dtcs_code_edit];
+                let pol = if self.dtcs_pol_edit { 1u8 } else { 0u8 };
+                // Set DTCS code with polarity.
+                let (tx_pol, rx_pol) = if is_tx {
+                    (pol, current_rx_pol)
+                } else {
+                    (current_tx_pol, pol)
+                };
+                let _ = self
+                    .cmd_tx
+                    .send(RadioCommand::SetDtcsCode(tx_pol, rx_pol, code));
+                // Then set the tone mode.
+                let new_mode = compute_tone_mode(current_tone_mode, is_tx, ToneType::Dpl);
+                let _ = self.cmd_tx.send(RadioCommand::SetToneMode(new_mode));
+            }
+        }
+    }
+
     /// Toggle VFO A/B and send the command immediately.
     fn toggle_vfo(&mut self) {
         self.current_vfo = self.current_vfo.toggle();
@@ -388,5 +614,56 @@ impl App {
             digits[i] = ((hz / power) % 10) as u8;
         }
         digits
+    }
+}
+
+/// Determine the current ToneType for a given side (Tx or Rx) from the tone_mode byte.
+fn current_tone_type(tone_mode: u8, is_tx: bool) -> ToneType {
+    if is_tx {
+        match tone_mode {
+            0x01 | 0x09 => ToneType::Tpl,
+            0x06 | 0x07 | 0x08 => ToneType::Dpl,
+            _ => ToneType::Csq,
+        }
+    } else {
+        match tone_mode {
+            0x02 | 0x04 | 0x08 | 0x09 => ToneType::Tpl,
+            0x03 | 0x05 | 0x07 => ToneType::Dpl,
+            _ => ToneType::Csq,
+        }
+    }
+}
+
+/// Compute the new tone_mode byte when changing one side (Tx or Rx) to a new ToneType.
+///
+/// Tone mode mapping (Tx, Rx):
+///   0x00 = (CSQ, CSQ)
+///   0x01 = (TPL, CSQ)
+///   0x02 = (CSQ, TPL)
+///   0x03 = (CSQ, DPL)
+///   0x06 = (DPL, CSQ)
+///   0x07 = (DPL, DPL)
+///   0x08 = (DPL, TPL)
+///   0x09 = (TPL, TPL)
+fn compute_tone_mode(current_mode: u8, is_tx: bool, new_type: ToneType) -> u8 {
+    // First determine what the *other* side currently is.
+    let other_type = current_tone_type(current_mode, !is_tx);
+    let (tx, rx) = if is_tx {
+        (new_type, other_type)
+    } else {
+        (other_type, new_type)
+    };
+
+    match (tx, rx) {
+        (ToneType::Csq, ToneType::Csq) => 0x00,
+        (ToneType::Tpl, ToneType::Csq) => 0x01,
+        (ToneType::Csq, ToneType::Tpl) => 0x02,
+        (ToneType::Csq, ToneType::Dpl) => 0x03,
+        (ToneType::Dpl, ToneType::Csq) => 0x06,
+        (ToneType::Dpl, ToneType::Dpl) => 0x07,
+        (ToneType::Dpl, ToneType::Tpl) => 0x08,
+        (ToneType::Tpl, ToneType::Tpl) => 0x09,
+        // These combinations may not have direct mappings; use closest.
+        (ToneType::Tpl, ToneType::Dpl) => 0x09, // fallback: TPL+TPL (radio may not support TPL+DPL)
     }
 }

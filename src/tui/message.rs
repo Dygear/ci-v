@@ -20,6 +20,12 @@ impl Vfo {
     }
 }
 
+impl Default for Vfo {
+    fn default() -> Self {
+        Self::A
+    }
+}
+
 impl fmt::Display for Vfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -37,6 +43,14 @@ pub enum RadioCommand {
     SetAfLevel(u16),
     SetSquelch(u16),
     SelectVfo(Vfo),
+    /// Set the tone/squelch function mode (0x00–0x09).
+    SetToneMode(u8),
+    /// Set Tx tone frequency (tenths of Hz, e.g. 1318 = 131.8 Hz).
+    SetTxTone(u16),
+    /// Set Rx tone frequency (tenths of Hz).
+    SetRxTone(u16),
+    /// Set DTCS code and polarity (tx_pol, rx_pol, code).
+    SetDtcsCode(u8, u8, u16),
     Quit,
 }
 
@@ -49,11 +63,35 @@ pub enum RadioEvent {
     Disconnected,
 }
 
+/// Per-VFO state (frequency, mode, and tone/duplex settings).
+#[derive(Debug, Clone, Default)]
+pub struct VfoState {
+    pub frequency: Option<Frequency>,
+    pub mode: Option<OperatingMode>,
+    pub rf_power: Option<u16>,
+    /// Combined tone/squelch function (0x00–0x09 from 0x16/0x5D).
+    pub tone_mode: Option<u8>,
+    /// Tx tone frequency in tenths of Hz (e.g. 1413 = 141.3 Hz).
+    pub tx_tone_freq: Option<u16>,
+    /// Rx tone frequency in tenths of Hz.
+    pub rx_tone_freq: Option<u16>,
+    /// DTCS code (e.g. 23, 754).
+    pub dtcs_code: Option<u16>,
+    /// DTCS Tx polarity (0=Normal, 1=Reverse).
+    pub dtcs_tx_pol: Option<u8>,
+    /// DTCS Rx polarity (0=Normal, 1=Reverse).
+    pub dtcs_rx_pol: Option<u8>,
+    /// Duplex direction (0x10=Simplex, 0x11=DUP-, 0x12=DUP+).
+    pub duplex: Option<u8>,
+    /// Offset frequency.
+    pub offset: Option<Frequency>,
+}
+
 /// Snapshot of all radio state. `None` means not yet read or read failed.
 #[derive(Debug, Clone, Default)]
 pub struct RadioState {
-    pub frequency: Option<Frequency>,
-    pub mode: Option<OperatingMode>,
+    pub vfo_a: VfoState,
+    pub vfo_b: VfoState,
     pub s_meter: Option<u16>,
     pub af_level: Option<u16>,
     pub squelch: Option<u16>,

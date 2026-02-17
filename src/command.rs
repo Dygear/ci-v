@@ -20,6 +20,14 @@ pub mod cmd {
     pub const LEVEL: u8 = 0x14;
     /// Read S-meter / power meter / SWR meter.
     pub const METER: u8 = 0x15;
+    /// Read/write various function settings (tone squelch, etc.).
+    pub const VARIOUS: u8 = 0x16;
+    /// Send/read tone/DTCS frequency and code settings.
+    pub const TONE: u8 = 0x1B;
+    /// Read duplex offset frequency.
+    pub const READ_OFFSET: u8 = 0x0C;
+    /// Read duplex direction.
+    pub const READ_DUPLEX: u8 = 0x0F;
     /// Power on/off control.
     pub const POWER: u8 = 0x18;
     /// Read transceiver ID.
@@ -34,6 +42,24 @@ pub mod level_sub {
     pub const RF_GAIN: u8 = 0x02;
     /// Squelch level.
     pub const SQUELCH: u8 = 0x03;
+    /// RF power level.
+    pub const RF_POWER: u8 = 0x0A;
+}
+
+/// Sub-commands for the VARIOUS (0x16) command.
+pub mod various_sub {
+    /// Combined tone/squelch function (returns 0x00–0x09).
+    pub const TONE_SQUELCH_FUNC: u8 = 0x5D;
+}
+
+/// Sub-commands for the TONE (0x1B) command.
+pub mod tone_sub {
+    /// Repeater tone (Tx) frequency — 3 bytes BCD.
+    pub const REPEATER_TONE: u8 = 0x00;
+    /// TSQL tone (Rx) frequency — 3 bytes BCD.
+    pub const TSQL_TONE: u8 = 0x01;
+    /// DTCS code and polarity — 3 bytes.
+    pub const DTCS: u8 = 0x02;
 }
 
 /// Sub-commands for the METER (0x15) command.
@@ -90,6 +116,20 @@ pub enum Command {
     PowerOff,
     /// Read the transceiver ID.
     ReadTransceiverId,
+    /// Read a various function setting. The `u8` is the sub-command (e.g. 0x5D).
+    ReadVarious(u8),
+    /// Read duplex direction (0x10=Simplex, 0x11=DUP-, 0x12=DUP+).
+    ReadDuplex,
+    /// Read duplex offset frequency (5-byte LE BCD, same as operating frequency).
+    ReadOffset,
+    /// Read a tone/DTCS setting. The `u8` is the sub-command (0x00=Tx tone, 0x01=Rx tone, 0x02=DTCS).
+    ReadTone(u8),
+    /// Write a various function setting. (sub_command, value).
+    SetVarious(u8, u8),
+    /// Write a tone frequency. (sub_command 0x00=Tx or 0x01=Rx, freq in tenths of Hz).
+    SetTone(u8, u16),
+    /// Write DTCS code and polarity. (tx_pol, rx_pol, code).
+    SetDtcs(u8, u8, u16),
 }
 
 impl Command {
@@ -117,6 +157,32 @@ impl Command {
             Command::PowerOn => Frame::new(cmd::POWER, Some(power_sub::ON), vec![]),
             Command::PowerOff => Frame::new(cmd::POWER, Some(power_sub::OFF), vec![]),
             Command::ReadTransceiverId => Frame::new(cmd::READ_ID, Some(0x00), vec![]),
+            Command::ReadVarious(sub) => Frame::new(cmd::VARIOUS, Some(*sub), vec![]),
+            Command::ReadDuplex => Frame::new(cmd::READ_DUPLEX, None, vec![]),
+            Command::ReadOffset => Frame::new(cmd::READ_OFFSET, None, vec![]),
+            Command::ReadTone(sub) => Frame::new(cmd::TONE, Some(*sub), vec![]),
+            Command::SetVarious(sub, value) => Frame::new(cmd::VARIOUS, Some(*sub), vec![*value]),
+            Command::SetTone(sub, freq_tenths) => {
+                // Encode tone frequency as 3 bytes: [0x00, hundreds_tens_BCD, units_tenths_BCD]
+                let ht = (*freq_tenths / 100) as u8;
+                let ut = (*freq_tenths % 100) as u8;
+                let ht_bcd = ((ht / 10) << 4) | (ht % 10);
+                let ut_bcd = ((ut / 10) << 4) | (ut % 10);
+                Frame::new(cmd::TONE, Some(*sub), vec![0x00, ht_bcd, ut_bcd])
+            }
+            Command::SetDtcs(tx_pol, rx_pol, code) => {
+                // Encode DTCS as 3 bytes: [polarity_nibbles, first_digit_BCD, second_third_BCD]
+                let polarity = (tx_pol << 4) | (rx_pol & 0x0F);
+                let first = (*code / 100) as u8;
+                let second_third = (*code % 100) as u8;
+                let first_bcd = ((first / 10) << 4) | (first % 10);
+                let st_bcd = ((second_third / 10) << 4) | (second_third % 10);
+                Frame::new(
+                    cmd::TONE,
+                    Some(tone_sub::DTCS),
+                    vec![polarity, first_bcd, st_bcd],
+                )
+            }
         };
         Ok(frame)
     }
@@ -133,6 +199,10 @@ impl Command {
             Command::ReadMeter(_) => cmd::METER,
             Command::PowerOn | Command::PowerOff => cmd::POWER,
             Command::ReadTransceiverId => cmd::READ_ID,
+            Command::ReadVarious(_) | Command::SetVarious(_, _) => cmd::VARIOUS,
+            Command::ReadDuplex => cmd::READ_DUPLEX,
+            Command::ReadOffset => cmd::READ_OFFSET,
+            Command::ReadTone(_) | Command::SetTone(_, _) | Command::SetDtcs(_, _, _) => cmd::TONE,
         }
     }
 
@@ -150,6 +220,11 @@ impl Command {
             Command::PowerOn => Some(power_sub::ON),
             Command::PowerOff => Some(power_sub::OFF),
             Command::ReadTransceiverId => Some(0x00),
+            Command::ReadVarious(sub) | Command::SetVarious(sub, _) => Some(*sub),
+            Command::ReadDuplex => None,
+            Command::ReadOffset => None,
+            Command::ReadTone(sub) | Command::SetTone(sub, _) => Some(*sub),
+            Command::SetDtcs(_, _, _) => Some(tone_sub::DTCS),
         }
     }
 }

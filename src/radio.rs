@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use log::{trace, warn};
 
-use crate::command::{Command, level_sub, meter_sub};
+use crate::command::{Command, level_sub, meter_sub, tone_sub, various_sub};
 use crate::error::{CivError, Result};
 use crate::frequency::Frequency;
 use crate::mode::OperatingMode;
@@ -300,6 +300,143 @@ impl Radio {
             Response::Ng => Err(CivError::Ng),
             other => {
                 warn!("unexpected response to SelectVfoB: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Read the RF power level (0–255).
+    pub fn read_rf_power(&mut self) -> Result<u16> {
+        match self.send_command(&Command::ReadLevel(level_sub::RF_POWER))? {
+            Response::Level(_, v) => Ok(v),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to ReadLevel(RF_POWER): {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Read a various function setting. Returns the raw byte value.
+    pub fn read_various(&mut self, sub: u8) -> Result<u8> {
+        match self.send_command(&Command::ReadVarious(sub))? {
+            Response::Various(_, v) => Ok(v),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to ReadVarious: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Read the tone squelch function (0x00–0x09).
+    pub fn read_tone_mode(&mut self) -> Result<u8> {
+        self.read_various(various_sub::TONE_SQUELCH_FUNC)
+    }
+
+    /// Read the duplex direction (0x10=Simplex, 0x11=DUP-, 0x12=DUP+).
+    pub fn read_duplex(&mut self) -> Result<u8> {
+        match self.send_command(&Command::ReadDuplex)? {
+            Response::Duplex(d) => Ok(d),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to ReadDuplex: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Read the duplex offset frequency.
+    pub fn read_offset(&mut self) -> Result<Frequency> {
+        match self.send_command(&Command::ReadOffset)? {
+            Response::Offset(f) => Ok(f),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to ReadOffset: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Read the repeater tone (Tx) frequency in tenths of Hz.
+    pub fn read_tx_tone(&mut self) -> Result<u16> {
+        match self.send_command(&Command::ReadTone(tone_sub::REPEATER_TONE))? {
+            Response::ToneFrequency(_, f) => Ok(f),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to ReadTone(Tx): {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Read the TSQL tone (Rx) frequency in tenths of Hz.
+    pub fn read_rx_tone(&mut self) -> Result<u16> {
+        match self.send_command(&Command::ReadTone(tone_sub::TSQL_TONE))? {
+            Response::ToneFrequency(_, f) => Ok(f),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to ReadTone(Rx): {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Read the DTCS code and polarity. Returns (tx_polarity, rx_polarity, code).
+    pub fn read_dtcs(&mut self) -> Result<(u8, u8, u16)> {
+        match self.send_command(&Command::ReadTone(tone_sub::DTCS))? {
+            Response::DtcsCode(tx_pol, rx_pol, code) => Ok((tx_pol, rx_pol, code)),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to ReadTone(DTCS): {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Set the tone/squelch function mode (0x00–0x09).
+    pub fn set_tone_mode(&mut self, mode: u8) -> Result<()> {
+        match self.send_command(&Command::SetVarious(various_sub::TONE_SQUELCH_FUNC, mode))? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to SetVarious(ToneMode): {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Set the repeater tone (Tx) frequency in tenths of Hz.
+    pub fn set_tx_tone(&mut self, freq_tenths: u16) -> Result<()> {
+        match self.send_command(&Command::SetTone(tone_sub::REPEATER_TONE, freq_tenths))? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to SetTone(Tx): {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Set the TSQL tone (Rx) frequency in tenths of Hz.
+    pub fn set_rx_tone(&mut self, freq_tenths: u16) -> Result<()> {
+        match self.send_command(&Command::SetTone(tone_sub::TSQL_TONE, freq_tenths))? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to SetTone(Rx): {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Set the DTCS code and polarity.
+    pub fn set_dtcs(&mut self, tx_pol: u8, rx_pol: u8, code: u16) -> Result<()> {
+        match self.send_command(&Command::SetDtcs(tx_pol, rx_pol, code))? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to SetDtcs: {:?}", other);
                 Err(CivError::InvalidFrame)
             }
         }

@@ -6,7 +6,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::radio::Radio;
 
-use super::message::{RadioCommand, RadioEvent, RadioState, Vfo};
+use super::message::{RadioCommand, RadioEvent, RadioState, Vfo, VfoState};
 
 /// Bits per byte on the wire with 8N1 framing (1 start + 8 data + 1 stop).
 const BITS_PER_BYTE: u64 = 10;
@@ -28,12 +28,23 @@ pub fn radio_loop(
     let mut tx_bits_per_sec: u32 = 0;
     let mut rx_bits_per_sec: u32 = 0;
 
+    // Per-VFO caches — we only poll the active VFO, so cache the other.
+    let mut active_vfo = Vfo::A;
+    let mut cached_vfo_a = VfoState::default();
+    let mut cached_vfo_b = VfoState::default();
+
     loop {
         // Process any pending commands (non-blocking).
         match cmd_rx.try_recv() {
             Ok(RadioCommand::Quit) => {
                 let _ = event_tx.send(RadioEvent::Disconnected);
                 return;
+            }
+            Ok(RadioCommand::SelectVfo(vfo)) => {
+                active_vfo = vfo;
+                if let Err(e) = execute_command(&mut radio, &RadioCommand::SelectVfo(vfo)) {
+                    let _ = event_tx.send(RadioEvent::Error(format!("{e}")));
+                }
             }
             Ok(cmd) => {
                 if let Err(e) = execute_command(&mut radio, &cmd) {
@@ -44,8 +55,14 @@ pub fn radio_loop(
             Err(std_mpsc::TryRecvError::Disconnected) => return,
         }
 
-        // Poll radio state.
-        let state = poll_state(&mut radio);
+        // Poll radio state for the active VFO.
+        let (vfo_state, s_meter, af_level, squelch) = poll_state(&mut radio);
+
+        // Update the active VFO's cache.
+        match active_vfo {
+            Vfo::A => cached_vfo_a = vfo_state,
+            Vfo::B => cached_vfo_b = vfo_state,
+        }
 
         // Compute bits-per-second rates from byte counters.
         let elapsed = last_rate_time.elapsed().as_secs_f64();
@@ -60,9 +77,13 @@ pub fn radio_loop(
         }
 
         let state = RadioState {
+            vfo_a: cached_vfo_a.clone(),
+            vfo_b: cached_vfo_b.clone(),
+            s_meter,
+            af_level,
+            squelch,
             tx_bits_per_sec,
             rx_bits_per_sec,
-            ..state
         };
 
         if event_tx.send(RadioEvent::StateUpdate(state)).is_err() {
@@ -83,18 +104,42 @@ fn execute_command(radio: &mut Radio, cmd: &RadioCommand) -> crate::Result<()> {
             Vfo::A => radio.select_vfo_a(),
             Vfo::B => radio.select_vfo_b(),
         },
+        RadioCommand::SetToneMode(mode) => radio.set_tone_mode(*mode),
+        RadioCommand::SetTxTone(freq) => radio.set_tx_tone(*freq),
+        RadioCommand::SetRxTone(freq) => radio.set_rx_tone(*freq),
+        RadioCommand::SetDtcsCode(tx_pol, rx_pol, code) => radio.set_dtcs(*tx_pol, *rx_pol, *code),
         RadioCommand::Quit => Ok(()),
     }
 }
 
-fn poll_state(radio: &mut Radio) -> RadioState {
-    RadioState {
-        frequency: radio.read_frequency().ok(),
-        mode: radio.read_mode().ok(),
-        s_meter: radio.read_s_meter().ok(),
-        af_level: radio.read_af_level().ok(),
-        squelch: radio.read_squelch().ok(),
-        tx_bits_per_sec: 0,
-        rx_bits_per_sec: 0,
-    }
+fn poll_state(radio: &mut Radio) -> (VfoState, Option<u16>, Option<u16>, Option<u16>) {
+    let frequency = radio.read_frequency().ok();
+    let mode = radio.read_mode().ok();
+    let rf_power = radio.read_rf_power().ok();
+    let tone_mode = radio.read_tone_mode().ok();
+    let duplex = radio.read_duplex().ok();
+    let offset = radio.read_offset().ok();
+    let tx_tone_freq = radio.read_tx_tone().ok();
+    let rx_tone_freq = radio.read_rx_tone().ok();
+    let dtcs = radio.read_dtcs().ok();
+
+    let s_meter = radio.read_s_meter().ok();
+    let af_level = radio.read_af_level().ok();
+    let squelch = radio.read_squelch().ok();
+
+    let vfo_state = VfoState {
+        frequency,
+        mode,
+        rf_power,
+        tone_mode,
+        tx_tone_freq,
+        rx_tone_freq,
+        dtcs_code: dtcs.map(|(_, _, code)| code),
+        dtcs_tx_pol: dtcs.map(|(tx, _, _)| tx),
+        dtcs_rx_pol: dtcs.map(|(_, rx, _)| rx),
+        duplex,
+        offset,
+    };
+
+    (vfo_state, s_meter, af_level, squelch)
 }

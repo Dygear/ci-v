@@ -4,7 +4,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use super::app::{self, App, Focus, InputMode};
+use super::app::{self, App, CTCSS_TONES, DTCS_CODES, Focus, InputMode, ToneEditPhase, ToneType};
+use super::message::{Vfo, VfoState};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -27,55 +28,43 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Split inner area into sections.
+    // Layout: meters row, VFO A, VFO B, error log, help bar.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // blank
-            Constraint::Length(1), // frequency
-            Constraint::Length(1), // blank
-            Constraint::Length(1), // mode + vfo
-            Constraint::Length(1), // blank
-            Constraint::Length(1), // s-meter
-            Constraint::Length(1), // af level
-            Constraint::Length(1), // squelch
+            Constraint::Length(1), // compact meters row
+            Constraint::Length(1), // VFO A row
+            Constraint::Length(1), // VFO B row
             Constraint::Min(0),    // error log
             Constraint::Length(1), // help bar
         ])
         .split(inner);
 
-    // Frequency line.
-    let freq_line = render_frequency(app);
-    frame.render_widget(Paragraph::new(freq_line), chunks[1]);
+    // Meters row: S-Meter, Volume, Squelch side-by-side.
+    render_compact_meters(frame, app, chunks[0]);
 
-    // Mode + VFO line.
-    let mode_vfo_line = render_mode_vfo(app);
-    frame.render_widget(Paragraph::new(mode_vfo_line), chunks[3]);
+    // VFO rows.
+    let vfo_a_line = render_vfo_row(
+        Vfo::A,
+        &app.radio_state.vfo_a,
+        app.current_vfo == Vfo::A,
+        app,
+    );
+    frame.render_widget(Paragraph::new(vfo_a_line), chunks[1]);
 
-    // S-meter.
-    let s_line = render_meter(app, "S-Meter", app.radio_state.s_meter, Color::Green, false);
-    frame.render_widget(Paragraph::new(s_line), chunks[5]);
-
-    // Volume.
-    let is_editing_vol = app.input_mode == InputMode::Editing(Focus::AfLevel);
-    let vol_line = render_volume(app, is_editing_vol);
-    frame.render_widget(Paragraph::new(vol_line), chunks[6]);
-
-    // Squelch.
-    let is_editing_sql = app.input_mode == InputMode::Editing(Focus::Squelch);
-    let sql_val = if is_editing_sql {
-        Some(app.sql_edit)
-    } else {
-        app.radio_state.squelch
-    };
-    let sql_line = render_meter(app, "Squelch ", sql_val, Color::Yellow, is_editing_sql);
-    frame.render_widget(Paragraph::new(sql_line), chunks[7]);
+    let vfo_b_line = render_vfo_row(
+        Vfo::B,
+        &app.radio_state.vfo_b,
+        app.current_vfo == Vfo::B,
+        app,
+    );
+    frame.render_widget(Paragraph::new(vfo_b_line), chunks[2]);
 
     // Error log.
-    render_error_log(frame, app, chunks[8]);
+    render_error_log(frame, app, chunks[3]);
 
     // Help bar: left-aligned help text + right-aligned stats.
-    let help_area = chunks[9];
+    let help_area = chunks[4];
     let help_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(0), Constraint::Length(62)])
@@ -88,181 +77,360 @@ pub fn draw(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(stats), help_chunks[1]);
 }
 
-fn render_frequency(app: &App) -> Line<'static> {
-    let is_editing = app.input_mode == InputMode::Editing(Focus::Frequency);
-    let hz = if is_editing {
-        app.freq_edit_hz
+fn render_compact_meters(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+        ])
+        .split(area);
+
+    // S-Meter.
+    let s_line = render_compact_meter("S", app.radio_state.s_meter, 255, Color::Green, false);
+    frame.render_widget(Paragraph::new(s_line), cols[0]);
+
+    // Volume.
+    let is_editing_vol = app.input_mode == InputMode::Editing(Focus::AfLevel);
+    let vol_step = if is_editing_vol {
+        Some(app.af_edit)
     } else {
-        app.radio_state.frequency.map(|f| f.hz()).unwrap_or(0)
+        app.radio_state.af_level.map(app::raw_to_volume_step)
+    };
+    let vol_line = render_compact_meter("Vol", vol_step, 39, Color::Cyan, is_editing_vol);
+    frame.render_widget(Paragraph::new(vol_line), cols[1]);
+
+    // Squelch.
+    let is_editing_sql = app.input_mode == InputMode::Editing(Focus::Squelch);
+    let sql_val = if is_editing_sql {
+        Some(app.sql_edit)
+    } else {
+        app.radio_state.squelch
+    };
+    let sql_line = render_compact_meter("SQL", sql_val, 255, Color::Yellow, is_editing_sql);
+    frame.render_widget(Paragraph::new(sql_line), cols[2]);
+}
+
+fn render_compact_meter(
+    label: &str,
+    value: Option<u16>,
+    max: u16,
+    color: Color,
+    is_editing: bool,
+) -> Line<'static> {
+    let (val, display) = match value {
+        Some(v) => {
+            let pct = (v as u32 * 100 / max as u32) as u16;
+            (v, format!("{pct:>3}%"))
+        }
+        None => (0, " ---%".to_string()),
     };
 
-    let digits = app.freq_digits(hz);
-    let mut spans = vec![Span::styled(
-        "  Frequency:  ",
-        Style::default().fg(Color::White),
-    )];
+    let bar_width = 8;
+    let filled = (val as usize * bar_width / max as usize).min(bar_width);
+    let empty = bar_width - filled;
 
-    for (i, &d) in digits.iter().enumerate() {
-        // Insert dots before positions 3 and 6.
-        if i == 3 || i == 6 {
-            spans.push(Span::styled(".", Style::default().fg(Color::DarkGray)));
-        }
+    let bar_filled: String = "\u{2588}".repeat(filled);
+    let bar_empty: String = "\u{2591}".repeat(empty);
 
-        let ch = format!("{d}");
-        let style = if is_editing && i == app.freq_cursor {
-            // Cursor digit: reverse video.
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::White)
-                .add_modifier(Modifier::BOLD)
-        } else if is_editing {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD)
+    let label_style = if is_editing {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
+
+    let mut spans = vec![
+        Span::styled(format!(" {label}:["), label_style),
+        Span::styled(bar_filled, Style::default().fg(color)),
+        Span::styled(bar_empty, Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("] {display}"), Style::default().fg(Color::White)),
+    ];
+
+    // Show volume as step/39 instead of percentage.
+    if label == "Vol" {
+        let step_display = match value {
+            Some(v) => format!(" {v:>2}/39"),
+            None => " --/39".to_string(),
         };
-        spans.push(Span::styled(ch, style));
-    }
-
-    spans.push(Span::styled(" MHz", Style::default().fg(Color::DarkGray)));
-
-    if !is_editing && app.radio_state.frequency.is_none() {
-        return Line::from(vec![
-            Span::styled("  Frequency:  ", Style::default().fg(Color::White)),
-            Span::styled("---.--.--- MHz", Style::default().fg(Color::DarkGray)),
-        ]);
+        spans.push(Span::styled(
+            step_display,
+            Style::default().fg(Color::DarkGray),
+        ));
     }
 
     Line::from(spans)
 }
 
-fn render_mode_vfo(app: &App) -> Line<'static> {
-    let is_editing_mode = app.input_mode == InputMode::Editing(Focus::Mode);
+fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> Line<'static> {
+    let style = if is_selected {
+        Style::default().fg(Color::Black).bg(Color::White)
+    } else {
+        Style::default()
+    };
 
-    let mode_str = if is_editing_mode {
+    let editing_freq = is_selected && app.input_mode == InputMode::Editing(Focus::Frequency);
+    let editing_mode = is_selected && app.input_mode == InputMode::Editing(Focus::Mode);
+    let editing_tx_tone = is_selected && app.input_mode == InputMode::Editing(Focus::TxTone);
+    let editing_rx_tone = is_selected && app.input_mode == InputMode::Editing(Focus::RxTone);
+
+    // VFO label.
+    let label = format!(" {vfo} ");
+
+    // Frequency.
+    let freq_str = if editing_freq {
+        format_frequency(app.freq_edit_hz)
+    } else {
+        state
+            .frequency
+            .map(|f| format_frequency(f.hz()))
+            .unwrap_or_else(|| "---.--.---".to_string())
+    };
+
+    // Mode.
+    let mode_str = if editing_mode {
         format!("{}", app.mode_edit)
     } else {
-        app.radio_state
+        state
             .mode
             .map(|m| format!("{m}"))
             .unwrap_or_else(|| "---".to_string())
     };
 
-    let mode_style = if is_editing_mode {
-        Style::default()
-            .fg(Color::Black)
-            .bg(Color::White)
-            .add_modifier(Modifier::BOLD)
+    // Width (derived from mode).
+    let width_str = if editing_mode {
+        mode_width(&app.mode_edit)
     } else {
-        Style::default()
-            .fg(Color::White)
-            .add_modifier(Modifier::BOLD)
+        state.mode.as_ref().map(mode_width).unwrap_or("-----")
     };
 
-    let vfo_str = format!("{}", app.current_vfo);
-    let vfo_style = Style::default()
-        .fg(Color::White)
-        .add_modifier(Modifier::BOLD);
+    // RF Power.
+    let power_str = state.rf_power.map(rf_power_label).unwrap_or("----");
 
-    Line::from(vec![
-        Span::styled("  Mode:       ", Style::default().fg(Color::White)),
-        Span::styled(format!("{mode_str:<5}"), mode_style),
-        Span::styled("       VFO: ", Style::default().fg(Color::White)),
-        Span::styled(vfo_str, vfo_style),
-    ])
-}
+    // Tone labels with data.
+    let tx_tone = if editing_tx_tone {
+        tone_edit_display(app)
+    } else {
+        tx_tone_display(state)
+    };
+    let rx_tone = if editing_rx_tone {
+        tone_edit_display(app)
+    } else {
+        rx_tone_display(state)
+    };
 
-fn render_meter(
-    _app: &App,
-    label: &str,
-    value: Option<u16>,
-    color: Color,
-    is_editing: bool,
-) -> Line<'static> {
-    let (val, pct, raw) = match value {
-        Some(v) => {
-            let p = (v as f64 / 255.0 * 100.0) as u16;
-            (v, p, format!("{v:>3}/255"))
+    // Duplex + offset.
+    let duplex_str = duplex_display(state);
+
+    // Build spans — if editing freq or mode, highlight those parts.
+    let mut spans: Vec<Span<'static>> = Vec::new();
+
+    spans.push(Span::styled(label, style.add_modifier(Modifier::BOLD)));
+
+    if editing_freq {
+        // Render frequency with cursor.
+        let digits = app.freq_digits(app.freq_edit_hz);
+        for (i, &d) in digits.iter().enumerate() {
+            if i == 3 || i == 6 {
+                spans.push(Span::styled(".", Style::default().fg(Color::DarkGray)));
+            }
+            let ch = format!("{d}");
+            let s = if i == app.freq_cursor {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Yellow)
+            };
+            spans.push(Span::styled(ch, s));
         }
-        None => (0, 0, "---/255".to_string()),
-    };
-
-    let bar_width = 20;
-    let filled = (val as usize * bar_width / 255).min(bar_width);
-    let empty = bar_width - filled;
-
-    let bar_filled: String = "\u{2588}".repeat(filled);
-    let bar_empty: String = "\u{2591}".repeat(empty);
-
-    let label_style = if is_editing {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::White)
-    };
+        spans.push(Span::styled(format!("{freq_str:<11}"), style));
+    }
 
-    Line::from(vec![
-        Span::styled(format!("  {label}: "), label_style),
-        Span::styled(bar_filled, Style::default().fg(color)),
-        Span::styled(bar_empty, Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("  {pct:>3}%  {raw}"),
-            Style::default().fg(Color::White),
-        ),
-    ])
-}
+    spans.push(Span::styled("  ", style));
 
-fn render_volume(app: &App, is_editing: bool) -> Line<'static> {
-    let step = if is_editing {
-        app.af_edit
-    } else {
-        app.radio_state
-            .af_level
-            .map(app::raw_to_volume_step)
-            .unwrap_or(0)
-    };
-
-    let bar_width = 20;
-    let filled = (step as usize * bar_width / 39).min(bar_width);
-    let empty = bar_width - filled;
-
-    let bar_filled: String = "\u{2588}".repeat(filled);
-    let bar_empty: String = "\u{2591}".repeat(empty);
-
-    let label_style = if is_editing {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::White)
-    };
-
-    let step_display = if !is_editing && app.radio_state.af_level.is_none() {
-        "--/39".to_string()
-    } else {
-        format!("{step:>2}/39")
-    };
-
-    let mut spans = vec![
-        Span::styled("  Volume:  ", label_style),
-        Span::styled(bar_filled, Style::default().fg(Color::Cyan)),
-        Span::styled(bar_empty, Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            format!("  {step_display}"),
-            Style::default().fg(Color::White),
-        ),
-    ];
-
-    if app.mute_restore_step.is_some() {
+    if editing_mode {
         spans.push(Span::styled(
-            "  MUTE",
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            format!("{mode_str:<5}"),
+            style.fg(Color::Yellow).add_modifier(Modifier::BOLD),
         ));
+    } else {
+        spans.push(Span::styled(format!("{mode_str:<5}"), style));
+    }
+
+    spans.push(Span::styled(
+        format!(" {width_str:<6} {power_str:<4}  Tx:"),
+        style,
+    ));
+
+    let tx_tone_style = if editing_tx_tone {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        style
+    };
+    spans.push(Span::styled(format!("{tx_tone:<9}"), tx_tone_style));
+
+    spans.push(Span::styled(" Rx:", style));
+
+    let rx_tone_style = if editing_rx_tone {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        style
+    };
+    spans.push(Span::styled(format!("{rx_tone:<9}"), rx_tone_style));
+
+    spans.push(Span::styled(format!(" {duplex_str}"), style));
+
+    // Pad the rest of the line with the selected style background.
+    if is_selected {
+        // Fill remaining width with spaces in the selected style.
+        spans.push(Span::styled(" ".repeat(20), style));
     }
 
     Line::from(spans)
+}
+
+fn format_frequency(hz: u64) -> String {
+    let mhz = hz / 1_000_000;
+    let khz = (hz % 1_000_000) / 1_000;
+    let h = hz % 1_000;
+    format!("{mhz:>3}.{khz:03}.{h:03}")
+}
+
+fn mode_width(mode: &crate::mode::OperatingMode) -> &'static str {
+    use crate::mode::OperatingMode::*;
+    match mode {
+        Fm | Am | Dv => "25kHz",
+        FmN | AmN => "12.5k",
+    }
+}
+
+fn rf_power_label(raw: u16) -> &'static str {
+    match raw {
+        0..=50 => "SLow",
+        51..=101 => "Low1",
+        102..=153 => "Low2",
+        154..=204 => "Mid",
+        _ => "High",
+    }
+}
+
+/// Derive Tx tone display string from tone_mode and associated data.
+fn tx_tone_display(state: &VfoState) -> String {
+    let mode = match state.tone_mode {
+        Some(m) => m,
+        None => return "---".to_string(),
+    };
+    match mode {
+        0x00 => "CSQ".to_string(),
+        0x01 | 0x09 => {
+            // TPL on Tx
+            match state.tx_tone_freq {
+                Some(f) => format!("TPL {:>5}", format_tone_freq(f)),
+                None => "TPL   ---".to_string(),
+            }
+        }
+        0x06 | 0x07 | 0x08 => {
+            // DPL on Tx
+            let pol = match state.dtcs_tx_pol {
+                Some(0) => "+",
+                Some(_) => "-",
+                None => "?",
+            };
+            match state.dtcs_code {
+                Some(c) => format!("DPL {pol}{c:03}"),
+                None => format!("DPL {pol}---"),
+            }
+        }
+        0x02 | 0x03 | 0x04 | 0x05 => "CSQ".to_string(),
+        _ => "---".to_string(),
+    }
+}
+
+/// Derive Rx tone display string from tone_mode and associated data.
+fn rx_tone_display(state: &VfoState) -> String {
+    let mode = match state.tone_mode {
+        Some(m) => m,
+        None => return "---".to_string(),
+    };
+    match mode {
+        0x00 | 0x01 | 0x06 => "CSQ".to_string(),
+        0x02 | 0x04 | 0x08 | 0x09 => {
+            // TPL on Rx
+            match state.rx_tone_freq {
+                Some(f) => format!("TPL {:>5}", format_tone_freq(f)),
+                None => "TPL   ---".to_string(),
+            }
+        }
+        0x03 | 0x05 | 0x07 => {
+            // DPL on Rx
+            let pol = match state.dtcs_rx_pol {
+                Some(0) => "+",
+                Some(_) => "-",
+                None => "?",
+            };
+            match state.dtcs_code {
+                Some(c) => format!("DPL {pol}{c:03}"),
+                None => format!("DPL {pol}---"),
+            }
+        }
+        _ => "---".to_string(),
+    }
+}
+
+/// Format tone frequency from tenths of Hz (e.g. 1413 → "141.3").
+fn format_tone_freq(tenths: u16) -> String {
+    format!("{}.{}", tenths / 10, tenths % 10)
+}
+
+/// Display string for tone editing (shown in VFO row while editing).
+fn tone_edit_display(app: &App) -> String {
+    match app.tone_edit_phase {
+        ToneEditPhase::SelectType => format!("{}", app.tone_type_edit),
+        ToneEditPhase::SelectValue => match app.tone_type_edit {
+            ToneType::Csq => "CSQ".to_string(),
+            ToneType::Tpl => {
+                let freq = CTCSS_TONES[app.tone_freq_edit];
+                format!("TPL {:>5}", format_tone_freq(freq))
+            }
+            ToneType::Dpl => {
+                let code = DTCS_CODES[app.dtcs_code_edit];
+                let pol = if app.dtcs_pol_edit { "-" } else { "+" };
+                format!("DPL {pol}{code:03}")
+            }
+        },
+    }
+}
+
+/// Format duplex direction and offset.
+fn duplex_display(state: &VfoState) -> String {
+    match state.duplex {
+        Some(0x10) => "Simplex".to_string(),
+        Some(0x11) => {
+            let offset = state
+                .offset
+                .map(|f| format_frequency(f.hz()))
+                .unwrap_or_else(|| "---".to_string());
+            format!("DUP- {offset}")
+        }
+        Some(0x12) => {
+            let offset = state
+                .offset
+                .map(|f| format_frequency(f.hz()))
+                .unwrap_or_else(|| "---".to_string());
+            format!("DUP+ {offset}")
+        }
+        Some(_) => "---".to_string(),
+        None => "---".to_string(),
+    }
 }
 
 fn render_error_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -289,18 +457,42 @@ fn render_error_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn render_help(app: &App) -> Line<'static> {
-    let help_text = match app.input_mode {
+    let help_text: String = match app.input_mode {
         InputMode::Normal => {
-            "  [Q]uit  [F]req  [M]ode  [V]FO  [A]F/Vol  [S]ql  +/- Vol  [0] Mute  Arrows: Freq"
+            "  [Q]uit  [F]req  [M]ode  [V]FO  [A]F/Vol  [S]ql  [T]x Tone  [R]x Tone  +/- Vol  [0] Mute".to_string()
         }
         InputMode::Editing(Focus::Frequency) => {
-            "  \u{2190}\u{2192} move cursor  \u{2191}\u{2193} change digit  0-9 type digit  Enter confirm  Esc cancel"
+            "  \u{2190}\u{2192} move cursor  \u{2191}\u{2193} change digit  0-9 type digit  Enter confirm  Esc cancel".to_string()
         }
         InputMode::Editing(Focus::Mode) => {
-            "  \u{2190}\u{2192} cycle mode  Enter confirm  Esc cancel"
+            "  \u{2190}\u{2192} cycle mode  Enter confirm  Esc cancel".to_string()
         }
         InputMode::Editing(Focus::AfLevel) | InputMode::Editing(Focus::Squelch) => {
-            "  \u{2191}\u{2193} adjust level  Enter confirm  Esc cancel"
+            "  \u{2191}\u{2193} adjust level  Enter confirm  Esc cancel".to_string()
+        }
+        InputMode::Editing(Focus::TxTone) | InputMode::Editing(Focus::RxTone) => {
+            match app.tone_edit_phase {
+                ToneEditPhase::SelectType => {
+                    format!("  \u{2190}\u{2192} [{}]  Enter select  Esc cancel", app.tone_type_edit)
+                }
+                ToneEditPhase::SelectValue => match app.tone_type_edit {
+                    ToneType::Tpl => {
+                        let freq = CTCSS_TONES[app.tone_freq_edit];
+                        format!(
+                            "  \u{2191}\u{2193} tone [{}.{}]  Enter confirm  Esc back",
+                            freq / 10, freq % 10
+                        )
+                    }
+                    ToneType::Dpl => {
+                        let code = DTCS_CODES[app.dtcs_code_edit];
+                        let pol = if app.dtcs_pol_edit { "-" } else { "+" };
+                        format!(
+                            "  \u{2191}\u{2193} code  \u{2190}\u{2192} polarity [{pol}{code:03}]  Enter confirm  Esc back"
+                        )
+                    }
+                    ToneType::Csq => "  Enter confirm  Esc cancel".to_string(),
+                },
+            }
         }
     };
 
