@@ -90,7 +90,7 @@ fn render_compact_meters(frame: &mut Frame, app: &App, area: ratatui::layout::Re
         .split(area);
 
     // S-Meter.
-    let s_line = render_compact_meter("S", app.radio_state.s_meter, 255, Color::Green, false);
+    let s_line = render_s_meter(app.radio_state.s_meter);
     frame.render_widget(Paragraph::new(s_line), cols[0]);
 
     // Volume.
@@ -112,6 +112,46 @@ fn render_compact_meters(frame: &mut Frame, app: &App, area: ratatui::layout::Re
     };
     let sql_line = render_compact_meter("SQL", sql_val, 255, Color::Yellow, is_editing_sql);
     frame.render_widget(Paragraph::new(sql_line), cols[2]);
+}
+
+/// Render the S-Meter with 14 levels using colored block characters.
+/// Levels 1–5: blue ▃, levels 6–10: green ▅, levels 11–14: yellow █.
+fn render_s_meter(raw: Option<u16>) -> Line<'static> {
+    const LEVELS: u16 = 14;
+
+    let filled = match raw {
+        Some(v) => ((v as u32 * LEVELS as u32 + 127) / 255).min(LEVELS as u32) as u16,
+        None => 0,
+    };
+
+    let mut spans = vec![Span::styled(" S:[", Style::default().fg(Color::White))];
+
+    for i in 1..=LEVELS {
+        let (ch, color) = match i {
+            1..=5 => ("\u{2583}", Color::Blue),   // ▃
+            6..=10 => ("\u{2585}", Color::Green), // ▅
+            _ => ("\u{2588}", Color::Yellow),     // █
+        };
+        if i <= filled {
+            spans.push(Span::styled(ch, Style::default().fg(color)));
+        } else {
+            spans.push(Span::styled(
+                "\u{2591}",
+                Style::default().fg(Color::DarkGray),
+            ));
+        }
+    }
+
+    let display = match raw {
+        Some(v) => {
+            let pct = (v as u32 * 100 / 255) as u16;
+            format!("] {pct:>3}%")
+        }
+        None => "] ---%".to_string(),
+    };
+    spans.push(Span::styled(display, Style::default().fg(Color::White)));
+
+    Line::from(spans)
 }
 
 fn render_compact_meter(
