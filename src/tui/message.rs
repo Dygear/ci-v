@@ -40,6 +40,10 @@ pub enum RadioCommand {
     SelectVfo(Vfo),
     /// Set RF power level (raw 0–255).
     SetRfPower(u16),
+    /// Set duplex direction (0x10=Simplex, 0x11=DUP-, 0x12=DUP+).
+    SetDuplex(u8),
+    /// Set duplex offset frequency in Hz.
+    SetOffset(u64),
     /// Set the tone/squelch function mode (0x00–0x09).
     SetToneMode(u8),
     /// Set Tx tone frequency (tenths of Hz, e.g. 1318 = 131.8 Hz).

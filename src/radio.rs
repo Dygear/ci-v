@@ -406,6 +406,30 @@ impl Radio {
         }
     }
 
+    /// Set the duplex direction (0x10=Simplex, 0x11=DUP-, 0x12=DUP+).
+    pub fn set_duplex(&mut self, dir: u8) -> Result<()> {
+        match self.send_command(&Command::SetDuplex(dir))? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to SetDuplex: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Set the duplex offset frequency in Hz.
+    pub fn set_offset(&mut self, hz: u64) -> Result<()> {
+        match self.send_command(&Command::SetOffset(hz))? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to SetOffset: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
     /// Set the tone/squelch function mode (0x00–0x09).
     pub fn set_tone_mode(&mut self, mode: u8) -> Result<()> {
         match self.send_command(&Command::SetVarious(various_sub::TONE_SQUELCH_FUNC, mode))? {

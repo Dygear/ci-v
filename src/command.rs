@@ -26,7 +26,9 @@ pub mod cmd {
     pub const TONE: u8 = 0x1B;
     /// Read duplex offset frequency.
     pub const READ_OFFSET: u8 = 0x0C;
-    /// Read duplex direction.
+    /// Set duplex offset frequency.
+    pub const SET_OFFSET: u8 = 0x0D;
+    /// Read/set duplex direction.
     pub const READ_DUPLEX: u8 = 0x0F;
     /// Power on/off control.
     pub const POWER: u8 = 0x18;
@@ -124,6 +126,10 @@ pub enum Command {
     ReadOffset,
     /// Read a tone/DTCS setting. The `u8` is the sub-command (0x00=Tx tone, 0x01=Rx tone, 0x02=DTCS).
     ReadTone(u8),
+    /// Set duplex direction (0x10=Simplex, 0x11=DUP-, 0x12=DUP+).
+    SetDuplex(u8),
+    /// Set duplex offset frequency (3-byte LE BCD, 100 Hz resolution).
+    SetOffset(u64),
     /// Write a various function setting. (sub_command, value).
     SetVarious(u8, u8),
     /// Write a tone frequency. (sub_command 0x00=Tx or 0x01=Rx, freq in tenths of Hz).
@@ -161,6 +167,13 @@ impl Command {
             Command::ReadDuplex => Frame::new(cmd::READ_DUPLEX, None, vec![]),
             Command::ReadOffset => Frame::new(cmd::READ_OFFSET, None, vec![]),
             Command::ReadTone(sub) => Frame::new(cmd::TONE, Some(*sub), vec![]),
+            Command::SetDuplex(dir) => Frame::new(cmd::READ_DUPLEX, Some(*dir), vec![]),
+            Command::SetOffset(hz) => {
+                // Encode as 3-byte LE BCD with 100 Hz resolution.
+                let raw = hz / 100;
+                let data = bcd::encode_bcd_le(raw, 3)?;
+                Frame::new(cmd::SET_OFFSET, None, data)
+            }
             Command::SetVarious(sub, value) => Frame::new(cmd::VARIOUS, Some(*sub), vec![*value]),
             Command::SetTone(sub, freq_tenths) => {
                 // Encode tone frequency as 3 bytes: [0x00, hundreds_tens_BCD, units_tenths_BCD]
@@ -200,8 +213,9 @@ impl Command {
             Command::PowerOn | Command::PowerOff => cmd::POWER,
             Command::ReadTransceiverId => cmd::READ_ID,
             Command::ReadVarious(_) | Command::SetVarious(_, _) => cmd::VARIOUS,
-            Command::ReadDuplex => cmd::READ_DUPLEX,
+            Command::ReadDuplex | Command::SetDuplex(_) => cmd::READ_DUPLEX,
             Command::ReadOffset => cmd::READ_OFFSET,
+            Command::SetOffset(_) => cmd::SET_OFFSET,
             Command::ReadTone(_) | Command::SetTone(_, _) | Command::SetDtcs(_, _, _) => cmd::TONE,
         }
     }
@@ -222,7 +236,8 @@ impl Command {
             Command::ReadTransceiverId => Some(0x00),
             Command::ReadVarious(sub) | Command::SetVarious(sub, _) => Some(*sub),
             Command::ReadDuplex => None,
-            Command::ReadOffset => None,
+            Command::SetDuplex(dir) => Some(*dir),
+            Command::ReadOffset | Command::SetOffset(_) => None,
             Command::ReadTone(sub) | Command::SetTone(sub, _) => Some(*sub),
             Command::SetDtcs(_, _, _) => Some(tone_sub::DTCS),
         }

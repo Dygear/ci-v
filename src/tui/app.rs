@@ -18,6 +18,7 @@ pub enum Focus {
     TxTone,
     RxTone,
     Power,
+    Offset,
 }
 
 /// Tone type category for the first phase of tone editing.
@@ -137,6 +138,80 @@ impl PowerLevel {
     }
 }
 
+/// Duplex direction for offset editing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DuplexDir {
+    Simplex,
+    DupPlus,
+    DupMinus,
+}
+
+impl DuplexDir {
+    /// CI-V raw value for this direction.
+    pub fn to_raw(self) -> u8 {
+        match self {
+            Self::Simplex => 0x10,
+            Self::DupPlus => 0x12,
+            Self::DupMinus => 0x11,
+        }
+    }
+
+    /// From CI-V raw duplex byte.
+    pub fn from_raw(raw: u8) -> Self {
+        match raw {
+            0x12 => Self::DupPlus,
+            0x11 => Self::DupMinus,
+            _ => Self::Simplex,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Simplex => "Simplex",
+            Self::DupPlus => "DUP+",
+            Self::DupMinus => "DUP-",
+        }
+    }
+
+    fn cycle_next(self) -> Self {
+        match self {
+            Self::Simplex => Self::DupPlus,
+            Self::DupPlus => Self::DupMinus,
+            Self::DupMinus => Self::Simplex,
+        }
+    }
+
+    fn cycle_prev(self) -> Self {
+        match self {
+            Self::Simplex => Self::DupMinus,
+            Self::DupPlus => Self::Simplex,
+            Self::DupMinus => Self::DupPlus,
+        }
+    }
+}
+
+/// Editing phase for offset editing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OffsetEditPhase {
+    /// Selecting duplex direction (Simplex / DUP+ / DUP-).
+    SelectDirection,
+    /// Editing the offset frequency value.
+    EditFrequency,
+}
+
+/// Hz step for each cursor position in the offset display (NN.NNN.NNN).
+/// 8 digits: max ~99,999,999 Hz (99.999 MHz offset).
+const OFFSET_DIGIT_POWERS: [u64; 8] = [
+    10_000_000, // pos 0: 10 MHz
+    1_000_000,  // pos 1: 1 MHz
+    100_000,    // pos 2: 100 kHz
+    10_000,     // pos 3: 10 kHz
+    1_000,      // pos 4: 1 kHz
+    100,        // pos 5: 100 Hz
+    10,         // pos 6: 10 Hz
+    1,          // pos 7: 1 Hz
+];
+
 /// Current input mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
@@ -218,6 +293,12 @@ pub struct App {
     pub dtcs_code_edit: usize,
     pub dtcs_pol_edit: bool,
 
+    // Offset edit state
+    pub offset_edit_phase: OffsetEditPhase,
+    pub duplex_dir_edit: DuplexDir,
+    pub offset_edit_hz: u64,
+    pub offset_cursor: usize,
+
     cmd_tx: std_mpsc::Sender<RadioCommand>,
 }
 
@@ -243,6 +324,10 @@ impl App {
             tone_freq_edit: 0,
             dtcs_code_edit: 0,
             dtcs_pol_edit: false,
+            offset_edit_phase: OffsetEditPhase::SelectDirection,
+            duplex_dir_edit: DuplexDir::Simplex,
+            offset_edit_hz: 600_000,
+            offset_cursor: 0,
             cmd_tx,
         }
     }
@@ -297,6 +382,7 @@ impl App {
             KeyCode::Char('t') | KeyCode::Char('T') => self.enter_edit(Focus::TxTone),
             KeyCode::Char('r') | KeyCode::Char('R') => self.enter_edit(Focus::RxTone),
             KeyCode::Char('p') | KeyCode::Char('P') => self.enter_edit(Focus::Power),
+            KeyCode::Char('o') | KeyCode::Char('O') => self.enter_edit(Focus::Offset),
             KeyCode::Char('w') | KeyCode::Char('W') => self.toggle_width(),
             KeyCode::Char('v') | KeyCode::Char('V') => self.toggle_vfo(),
             KeyCode::Char('+') | KeyCode::Char('=') => self.adjust_volume(1),
@@ -321,6 +407,7 @@ impl App {
                 | (KeyCode::Char('t') | KeyCode::Char('T'), Focus::TxTone)
                 | (KeyCode::Char('r') | KeyCode::Char('R'), Focus::RxTone)
                 | (KeyCode::Char('p') | KeyCode::Char('P'), Focus::Power)
+                | (KeyCode::Char('o') | KeyCode::Char('O'), Focus::Offset)
         );
 
         match key.code {
@@ -333,6 +420,10 @@ impl App {
                     && self.tone_edit_phase == ToneEditPhase::SelectValue
                 {
                     self.tone_edit_phase = ToneEditPhase::SelectType;
+                } else if focus == Focus::Offset
+                    && self.offset_edit_phase == OffsetEditPhase::EditFrequency
+                {
+                    self.offset_edit_phase = OffsetEditPhase::SelectDirection;
                 } else {
                     self.input_mode = InputMode::Normal;
                 }
@@ -340,6 +431,8 @@ impl App {
             KeyCode::Enter => {
                 if matches!(focus, Focus::TxTone | Focus::RxTone) {
                     self.handle_tone_enter(focus);
+                } else if focus == Focus::Offset {
+                    self.handle_offset_enter();
                 } else {
                     self.confirm_edit(focus);
                     self.input_mode = InputMode::Normal;
@@ -352,6 +445,7 @@ impl App {
                 Focus::Squelch => self.handle_level_edit_key(key.code),
                 Focus::TxTone | Focus::RxTone => self.handle_tone_edit_key(key.code),
                 Focus::Power => self.handle_power_edit_key(key.code),
+                Focus::Offset => self.handle_offset_edit_key(key.code),
             },
         }
     }
@@ -389,6 +483,23 @@ impl App {
                     .rf_power
                     .map(PowerLevel::from_raw)
                     .unwrap_or(PowerLevel::Mid);
+            }
+            Focus::Offset => {
+                self.offset_edit_phase = OffsetEditPhase::SelectDirection;
+                let state = self.active_vfo_state();
+                let duplex = state.duplex;
+                let offset = state.offset;
+                let freq_hz = state.frequency.map(|f| f.hz()).unwrap_or(0);
+                self.duplex_dir_edit = duplex
+                    .map(DuplexDir::from_raw)
+                    .unwrap_or(DuplexDir::Simplex);
+                let default_offset = if freq_hz >= 300_000_000 {
+                    5_000_000 // UHF: 5 MHz
+                } else {
+                    600_000 // VHF: 600 kHz
+                };
+                self.offset_edit_hz = offset.map(|f| f.hz()).unwrap_or(default_offset);
+                self.offset_cursor = 0;
             }
             Focus::TxTone | Focus::RxTone => {
                 self.tone_edit_phase = ToneEditPhase::SelectType;
@@ -434,6 +545,7 @@ impl App {
             Focus::Squelch => RadioCommand::SetSquelch(self.sql_edit),
             Focus::Power => RadioCommand::SetRfPower(self.power_edit.to_raw()),
             Focus::TxTone | Focus::RxTone => return, // handled by confirm_tone
+            Focus::Offset => return,                 // handled by handle_offset_enter
         };
         let _ = self.cmd_tx.send(cmd);
     }
@@ -542,6 +654,83 @@ impl App {
                 self.power_edit = self.power_edit.cycle_down();
             }
             _ => {}
+        }
+    }
+
+    fn handle_offset_edit_key(&mut self, code: KeyCode) {
+        match self.offset_edit_phase {
+            OffsetEditPhase::SelectDirection => match code {
+                KeyCode::Left => {
+                    self.duplex_dir_edit = self.duplex_dir_edit.cycle_prev();
+                }
+                KeyCode::Right => {
+                    self.duplex_dir_edit = self.duplex_dir_edit.cycle_next();
+                }
+                _ => {}
+            },
+            OffsetEditPhase::EditFrequency => match code {
+                KeyCode::Left => {
+                    if self.offset_cursor > 0 {
+                        self.offset_cursor -= 1;
+                    }
+                }
+                KeyCode::Right => {
+                    if self.offset_cursor < 7 {
+                        self.offset_cursor += 1;
+                    }
+                }
+                KeyCode::Up => {
+                    let step = OFFSET_DIGIT_POWERS[self.offset_cursor];
+                    let new_hz = self.offset_edit_hz.saturating_add(step);
+                    if new_hz <= 99_999_999 {
+                        self.offset_edit_hz = new_hz;
+                    }
+                }
+                KeyCode::Down => {
+                    let step = OFFSET_DIGIT_POWERS[self.offset_cursor];
+                    self.offset_edit_hz = self.offset_edit_hz.saturating_sub(step);
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() => {
+                    let digit = c as u64 - b'0' as u64;
+                    let power = OFFSET_DIGIT_POWERS[self.offset_cursor];
+                    let current_digit = (self.offset_edit_hz / power) % 10;
+                    let new_hz = self.offset_edit_hz - current_digit * power + digit * power;
+                    if new_hz <= 99_999_999 {
+                        self.offset_edit_hz = new_hz;
+                        if self.offset_cursor < 7 {
+                            self.offset_cursor += 1;
+                        }
+                    }
+                }
+                _ => {}
+            },
+        }
+    }
+
+    fn handle_offset_enter(&mut self) {
+        match self.offset_edit_phase {
+            OffsetEditPhase::SelectDirection => {
+                if self.duplex_dir_edit == DuplexDir::Simplex {
+                    // Simplex: just set the duplex direction, no offset needed.
+                    let _ = self
+                        .cmd_tx
+                        .send(RadioCommand::SetDuplex(self.duplex_dir_edit.to_raw()));
+                    self.input_mode = InputMode::Normal;
+                } else {
+                    // DUP+/DUP-: advance to offset frequency editing.
+                    self.offset_edit_phase = OffsetEditPhase::EditFrequency;
+                }
+            }
+            OffsetEditPhase::EditFrequency => {
+                // Send both duplex direction and offset frequency.
+                let _ = self
+                    .cmd_tx
+                    .send(RadioCommand::SetDuplex(self.duplex_dir_edit.to_raw()));
+                let _ = self
+                    .cmd_tx
+                    .send(RadioCommand::SetOffset(self.offset_edit_hz));
+                self.input_mode = InputMode::Normal;
+            }
         }
     }
 
@@ -723,6 +912,15 @@ impl App {
     pub fn freq_digits(&self, hz: u64) -> [u8; 9] {
         let mut digits = [0u8; 9];
         for (i, &power) in FREQ_DIGIT_POWERS.iter().enumerate() {
+            digits[i] = ((hz / power) % 10) as u8;
+        }
+        digits
+    }
+
+    /// Get the 8 digits of the offset for display (NN.NNN.NNN).
+    pub fn offset_digits(&self, hz: u64) -> [u8; 8] {
+        let mut digits = [0u8; 8];
+        for (i, &power) in OFFSET_DIGIT_POWERS.iter().enumerate() {
             digits[i] = ((hz / power) % 10) as u8;
         }
         digits

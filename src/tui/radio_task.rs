@@ -105,6 +105,8 @@ fn execute_command(radio: &mut Radio, cmd: &RadioCommand) -> crate::Result<()> {
             Vfo::B => radio.select_vfo_b(),
         },
         RadioCommand::SetRfPower(level) => radio.set_rf_power(*level),
+        RadioCommand::SetDuplex(dir) => radio.set_duplex(*dir),
+        RadioCommand::SetOffset(hz) => radio.set_offset(*hz),
         RadioCommand::SetToneMode(mode) => radio.set_tone_mode(*mode),
         RadioCommand::SetTxTone(freq) => radio.set_tx_tone(*freq),
         RadioCommand::SetRxTone(freq) => radio.set_rx_tone(*freq),

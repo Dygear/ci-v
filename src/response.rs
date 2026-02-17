@@ -72,6 +72,8 @@ pub fn parse_response(frame: &Frame, command: &Command) -> Result<Response> {
         Command::ReadDuplex => parse_duplex_response(frame),
         Command::ReadOffset => parse_offset_response(frame),
         Command::ReadTone(sub) => parse_tone_response(frame, *sub),
+        Command::SetDuplex(_) => Ok(Response::Ok),
+        Command::SetOffset(_) => Ok(Response::Ok),
         Command::SetVarious(_, _) => Ok(Response::Ok),
         Command::SetTone(_, _) => Ok(Response::Ok),
         Command::SetDtcs(_, _, _) => Ok(Response::Ok),

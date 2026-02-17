@@ -5,7 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::app::{
-    self, App, CTCSS_TONES, DTCS_CODES, Focus, InputMode, PowerLevel, ToneEditPhase, ToneType,
+    self, App, CTCSS_TONES, DTCS_CODES, DuplexDir, Focus, InputMode, OffsetEditPhase, PowerLevel,
+    ToneEditPhase, ToneType,
 };
 use super::message::{Vfo, VfoState};
 
@@ -219,6 +220,7 @@ fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> L
     let editing_tx_tone = is_selected && app.input_mode == InputMode::Editing(Focus::TxTone);
     let editing_rx_tone = is_selected && app.input_mode == InputMode::Editing(Focus::RxTone);
     let editing_power = is_selected && app.input_mode == InputMode::Editing(Focus::Power);
+    let editing_offset = is_selected && app.input_mode == InputMode::Editing(Focus::Offset);
 
     // VFO label.
     let label = format!(" {vfo} ");
@@ -270,7 +272,11 @@ fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> L
     };
 
     // Duplex + offset.
-    let duplex_spans = duplex_spans(state, style);
+    let duplex_spans = if editing_offset {
+        offset_edit_spans(app)
+    } else {
+        duplex_spans(state, style)
+    };
 
     // Build spans — if editing freq or mode, highlight those parts.
     let mut spans: Vec<Span<'static>> = Vec::new();
@@ -493,7 +499,7 @@ fn tone_edit_display(app: &App) -> String {
 /// Offset format: `+  5 000 000` (10 chars for the number, space-grouped).
 fn duplex_spans(state: &VfoState, base_style: Style) -> Vec<Span<'static>> {
     match state.duplex {
-        Some(0x10) => vec![Span::styled("Simplex", base_style)],
+        Some(0x10) => vec![Span::styled("\u{25C6}    Simplex", base_style)],
         Some(dir @ (0x11 | 0x12)) => {
             let (sign, color) = if dir == 0x12 {
                 ("+", Color::Yellow)
@@ -514,11 +520,54 @@ fn duplex_spans(state: &VfoState, base_style: Style) -> Vec<Span<'static>> {
     }
 }
 
+/// Render offset editing spans (shown in VFO row while editing offset).
+fn offset_edit_spans(app: &App) -> Vec<Span<'static>> {
+    let edit_style = Style::default()
+        .fg(Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+
+    match app.offset_edit_phase {
+        OffsetEditPhase::SelectDirection => {
+            vec![Span::styled(
+                app.duplex_dir_edit.label().to_string(),
+                edit_style,
+            )]
+        }
+        OffsetEditPhase::EditFrequency => {
+            let (sign, color) = match app.duplex_dir_edit {
+                DuplexDir::DupPlus => ("+", Color::Yellow),
+                DuplexDir::DupMinus => ("-", Color::Cyan),
+                DuplexDir::Simplex => (" ", Color::White),
+            };
+            let mut spans = vec![Span::styled(format!("{sign} "), Style::default().fg(color))];
+
+            // Render offset digits with cursor highlight (NN.NNN.NNN).
+            let digits = app.offset_digits(app.offset_edit_hz);
+            for (i, &d) in digits.iter().enumerate() {
+                if i == 2 || i == 5 {
+                    spans.push(Span::styled(".", Style::default().fg(Color::DarkGray)));
+                }
+                let ch = format!("{d}");
+                let s = if i == app.offset_cursor {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Yellow)
+                };
+                spans.push(Span::styled(ch, s));
+            }
+            spans
+        }
+    }
+}
+
 /// Format an offset in Hz with space-separated digit groups, right-aligned to 10 chars.
 ///
 /// Examples:
-///   600_000   → "    600 000"
-///   5_000_000 → "  5 000 000"
+///   600_000   → "   600 000"
+///   5_000_000 → " 5 000 000"
 fn format_offset_hz(hz: u64) -> String {
     // Format the number with space-separated groups of 3 digits.
     let num_str = hz.to_string();
@@ -530,8 +579,8 @@ fn format_offset_hz(hz: u64) -> String {
         }
         grouped.push(ch);
     }
-    // Right-align to 11 chars (enough for "99 999 999" with spaces).
-    format!("{grouped:>11}")
+    // Right-align to 10 chars (enough for "99 999 999" with spaces).
+    format!("{grouped:>10}")
 }
 
 fn render_error_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -560,7 +609,7 @@ fn render_error_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn render_help(app: &App) -> Line<'static> {
     let help_text: String = match app.input_mode {
         InputMode::Normal => {
-            "  [Q]uit  [F]req  [M]ode  [W]idth  [V]FO  [A]F/Vol  [S]ql  [P]wr  [T]x Tone  [R]x Tone  +/- Vol  [0] Mute".to_string()
+            "  [Q]uit  [F]req  [M]ode  [W]idth  [V]FO  [A]F/Vol  [S]ql  [P]wr  [O]ffset  [T]x Tone  [R]x Tone  +/- Vol  [0] Mute".to_string()
         }
         InputMode::Editing(Focus::Frequency) => {
             "  \u{2190}\u{2192} move cursor  \u{2191}\u{2193} change digit  0-9 type digit  Enter confirm  Esc cancel".to_string()
@@ -596,6 +645,16 @@ fn render_help(app: &App) -> Line<'static> {
                     }
                     ToneType::Csq => "  Enter confirm  Esc cancel".to_string(),
                 },
+            }
+        }
+        InputMode::Editing(Focus::Offset) => {
+            match app.offset_edit_phase {
+                OffsetEditPhase::SelectDirection => {
+                    format!("  \u{2190}\u{2192} [{}]  Enter select  Esc cancel", app.duplex_dir_edit.label())
+                }
+                OffsetEditPhase::EditFrequency => {
+                    "  \u{2190}\u{2192} move cursor  \u{2191}\u{2193} change digit  0-9 type digit  Enter confirm  Esc back".to_string()
+                }
             }
         }
     };
