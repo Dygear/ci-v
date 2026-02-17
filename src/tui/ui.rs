@@ -20,7 +20,7 @@ pub fn draw(frame: &mut Frame, app: &App) {
         "Disconnected"
     };
     let block = Block::default()
-        .title(" CI-V Controller -- ICOM ID-52A Plus ")
+        .title(" CI-V Controller -- ICOM ID-52Plus ")
         .title_bottom(format!(" {status} "))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(if app.connected {
