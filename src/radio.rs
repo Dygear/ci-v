@@ -1,14 +1,14 @@
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
-use log::{debug, trace, warn};
+use log::{trace, warn};
 
-use crate::command::{level_sub, meter_sub, Command};
+use crate::command::{Command, level_sub, meter_sub};
 use crate::error::{CivError, Result};
 use crate::frequency::Frequency;
 use crate::mode::OperatingMode;
 use crate::port;
-use crate::protocol::{Frame, ADDR_CONTROLLER, ADDR_ID52};
+use crate::protocol::{ADDR_CONTROLLER, ADDR_ID52, Frame};
 use crate::response::{self, Response};
 
 /// Configuration for the radio connection.
@@ -22,9 +22,6 @@ pub struct RadioConfig {
     pub baud_rate: u32,
     /// Timeout for waiting for a response.
     pub timeout: Duration,
-    /// Whether USB echo-back is enabled.
-    /// USB serial mode echoes sent commands before the response.
-    pub echo_back: bool,
 }
 
 impl Default for RadioConfig {
@@ -34,7 +31,6 @@ impl Default for RadioConfig {
             controller_addr: ADDR_CONTROLLER,
             baud_rate: 19200,
             timeout: Duration::from_millis(1000),
-            echo_back: true,
         }
     }
 }
@@ -103,42 +99,15 @@ impl Radio {
         self.port.flush().map_err(CivError::Io)?;
         self.tx_bytes += bytes.len() as u64;
 
-        // If echo-back is enabled, read and discard the echo first.
-        if self.config.echo_back {
-            self.read_echo(&frame)?;
-        }
-
-        // Read the actual response.
+        // Read the actual response, skipping any echo-back frames.
         let response_frame = self.read_response()?;
         response::parse_response(&response_frame, command)
     }
 
-    /// Read and discard the echo-back frame.
-    fn read_echo(&mut self, sent_frame: &Frame) -> Result<()> {
-        let deadline = Instant::now() + self.config.timeout;
-
-        loop {
-            self.fill_buf(deadline)?;
-
-            if let Some((frame, consumed)) = Frame::parse(&self.buf)? {
-                self.buf.drain(..consumed);
-                // The echo is a frame addressed to the radio (dst = radio_addr).
-                if frame.dst == self.config.radio_addr {
-                    trace!("echo: {:02X?}", sent_frame.to_bytes());
-                    return Ok(());
-                }
-                // If we got something else, keep reading (could be buffered data).
-                debug!("unexpected frame while waiting for echo: {:?}", frame);
-            }
-
-            if Instant::now() >= deadline {
-                warn!("timeout waiting for echo");
-                return Err(CivError::Timeout);
-            }
-        }
-    }
-
     /// Read a response frame from the radio (addressed to the controller).
+    ///
+    /// Transparently skips echo-back frames (addressed to the radio) so the
+    /// software works regardless of whether echo-back is ON or OFF.
     fn read_response(&mut self) -> Result<Frame> {
         let deadline = Instant::now() + self.config.timeout;
 
@@ -151,8 +120,8 @@ impl Radio {
                     trace!("RX: {:?}", frame);
                     return Ok(frame);
                 }
-                // Skip echo frames that slipped through.
-                debug!("skipping frame not addressed to controller: {:?}", frame);
+                // Skip echo-back frames (addressed to the radio, not to us).
+                trace!("skipping echo frame: {:?}", frame);
             }
 
             if Instant::now() >= deadline {
@@ -169,7 +138,9 @@ impl Radio {
         }
 
         // Set the timeout for this read.
-        let _ = self.port.set_timeout(remaining.min(Duration::from_millis(100)));
+        let _ = self
+            .port
+            .set_timeout(remaining.min(Duration::from_millis(100)));
 
         let mut tmp = [0u8; 128];
         match self.port.read(&mut tmp) {

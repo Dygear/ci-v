@@ -7,8 +7,8 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use tokio::sync::mpsc as tokio_mpsc;
 
 use ci_v::Radio;
@@ -43,7 +43,7 @@ fn main() {
             eprintln!("         CI-V > CI-V Transceive = ON");
             eprintln!("         CI-V > CI-V USB/Bluetooth->Remote Transceive Address = 00");
             eprintln!("         USB Connect = Serialport");
-            eprintln!("         USB Serialport Function = CI-V (Echo Back ON)");
+            eprintln!("         USB Serialport Function = CI-V (Echo Back ON or OFF)");
             eprintln!("  3. Ensure the ICOM USB driver is installed");
             std::process::exit(1);
         }
