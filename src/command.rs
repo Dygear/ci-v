@@ -34,6 +34,8 @@ pub mod cmd {
     pub const POWER: u8 = 0x18;
     /// Read transceiver ID.
     pub const READ_ID: u8 = 0x19;
+    /// Read GPS position data (My Position).
+    pub const READ_GPS: u8 = 0x23;
 }
 
 /// Sub-commands for the LEVEL (0x14) command.
@@ -136,6 +138,8 @@ pub enum Command {
     SetTone(u8, u16),
     /// Write DTCS code and polarity. (tx_pol, rx_pol, code).
     SetDtcs(u8, u8, u16),
+    /// Read GPS position data (command 0x23, sub 0x00).
+    ReadGpsPosition,
 }
 
 impl Command {
@@ -183,6 +187,7 @@ impl Command {
                 let ut_bcd = ((ut / 10) << 4) | (ut % 10);
                 Frame::new(cmd::TONE, Some(*sub), vec![0x00, ht_bcd, ut_bcd])
             }
+            Command::ReadGpsPosition => Frame::new(cmd::READ_GPS, Some(0x00), vec![]),
             Command::SetDtcs(tx_pol, rx_pol, code) => {
                 // Encode DTCS as 3 bytes: [polarity_nibbles, first_digit_BCD, second_third_BCD]
                 let polarity = (tx_pol << 4) | (rx_pol & 0x0F);
@@ -217,6 +222,7 @@ impl Command {
             Command::ReadOffset => cmd::READ_OFFSET,
             Command::SetOffset(_) => cmd::SET_OFFSET,
             Command::ReadTone(_) | Command::SetTone(_, _) | Command::SetDtcs(_, _, _) => cmd::TONE,
+            Command::ReadGpsPosition => cmd::READ_GPS,
         }
     }
 
@@ -240,6 +246,7 @@ impl Command {
             Command::ReadOffset | Command::SetOffset(_) => None,
             Command::ReadTone(sub) | Command::SetTone(sub, _) => Some(*sub),
             Command::SetDtcs(_, _, _) => Some(tone_sub::DTCS),
+            Command::ReadGpsPosition => Some(0x00),
         }
     }
 }

@@ -6,7 +6,7 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::radio::Radio;
 
-use super::message::{RadioCommand, RadioEvent, RadioState, Vfo, VfoState};
+use super::message::{GpsPosition, RadioCommand, RadioEvent, RadioState, Vfo, VfoState};
 
 /// Bits per byte on the wire with 8N1 framing (1 start + 8 data + 1 stop).
 const BITS_PER_BYTE: u64 = 10;
@@ -56,7 +56,7 @@ pub fn radio_loop(
         }
 
         // Poll radio state for the active VFO.
-        let (vfo_state, s_meter, af_level, squelch) = poll_state(&mut radio);
+        let (vfo_state, s_meter, af_level, squelch, gps_position) = poll_state(&mut radio);
 
         // Update the active VFO's cache.
         match active_vfo {
@@ -82,6 +82,7 @@ pub fn radio_loop(
             s_meter,
             af_level,
             squelch,
+            gps_position,
             tx_bits_per_sec,
             rx_bits_per_sec,
         };
@@ -115,7 +116,15 @@ fn execute_command(radio: &mut Radio, cmd: &RadioCommand) -> crate::Result<()> {
     }
 }
 
-fn poll_state(radio: &mut Radio) -> (VfoState, Option<u16>, Option<u16>, Option<u16>) {
+fn poll_state(
+    radio: &mut Radio,
+) -> (
+    VfoState,
+    Option<u16>,
+    Option<u16>,
+    Option<u16>,
+    Option<GpsPosition>,
+) {
     let frequency = radio.read_frequency().ok();
     let mode = radio.read_mode().ok();
     let rf_power = radio.read_rf_power().ok();
@@ -129,6 +138,7 @@ fn poll_state(radio: &mut Radio) -> (VfoState, Option<u16>, Option<u16>, Option<
     let s_meter = radio.read_s_meter().ok();
     let af_level = radio.read_af_level().ok();
     let squelch = radio.read_squelch().ok();
+    let gps_position = radio.read_gps_position().ok();
 
     let vfo_state = VfoState {
         frequency,
@@ -144,5 +154,5 @@ fn poll_state(radio: &mut Radio) -> (VfoState, Option<u16>, Option<u16>, Option<
         offset,
     };
 
-    (vfo_state, s_meter, af_level, squelch)
+    (vfo_state, s_meter, af_level, squelch, gps_position)
 }

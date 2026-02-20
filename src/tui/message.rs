@@ -88,6 +88,33 @@ pub struct VfoState {
     pub offset: Option<Frequency>,
 }
 
+/// GPS position data from the radio's built-in receiver.
+#[derive(Debug, Clone, Default)]
+pub struct GpsPosition {
+    /// Latitude in decimal degrees (negative = South).
+    pub latitude: f64,
+    /// Longitude in decimal degrees (negative = West).
+    pub longitude: f64,
+    /// Altitude in meters (negative = below sea level).
+    pub altitude: f64,
+    /// Course/heading in degrees (0–359).
+    pub course: u16,
+    /// Speed in km/h.
+    pub speed: f64,
+    /// UTC year.
+    pub utc_year: u16,
+    /// UTC month (1–12).
+    pub utc_month: u8,
+    /// UTC day (1–31).
+    pub utc_day: u8,
+    /// UTC hour (0–23).
+    pub utc_hour: u8,
+    /// UTC minute (0–59).
+    pub utc_minute: u8,
+    /// UTC second (0–59).
+    pub utc_second: u8,
+}
+
 /// Snapshot of all radio state. `None` means not yet read or read failed.
 #[derive(Debug, Clone, Default)]
 pub struct RadioState {
@@ -96,6 +123,7 @@ pub struct RadioState {
     pub s_meter: Option<u16>,
     pub af_level: Option<u16>,
     pub squelch: Option<u16>,
+    pub gps_position: Option<GpsPosition>,
     pub tx_bits_per_sec: u32,
     pub rx_bits_per_sec: u32,
 }

@@ -9,7 +9,8 @@ use crate::frequency::Frequency;
 use crate::mode::OperatingMode;
 use crate::port;
 use crate::protocol::{ADDR_CONTROLLER, ADDR_ID52, Frame};
-use crate::response::{self, Response};
+use crate::response::{self, RawGpsPosition, Response};
+use crate::tui::message::GpsPosition;
 
 /// Configuration for the radio connection.
 #[derive(Debug, Clone)]
@@ -476,5 +477,54 @@ impl Radio {
                 Err(CivError::InvalidFrame)
             }
         }
+    }
+
+    /// Read GPS position data from the radio's built-in receiver.
+    pub fn read_gps_position(&mut self) -> Result<GpsPosition> {
+        match self.send_command(&Command::ReadGpsPosition)? {
+            Response::GpsPosition(raw) => Ok(raw_to_gps_position(&raw)),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to ReadGpsPosition: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+}
+
+/// Convert a `RawGpsPosition` (integer BCD fields) to a `GpsPosition` (float fields).
+fn raw_to_gps_position(raw: &RawGpsPosition) -> GpsPosition {
+    // Latitude: dd + mm.mmm / 60
+    let lat_minutes = raw.lat_min as f64 + raw.lat_min_frac as f64 / 1000.0;
+    let mut latitude = raw.lat_deg as f64 + lat_minutes / 60.0;
+    if !raw.lat_north {
+        latitude = -latitude;
+    }
+
+    // Longitude: ddd + mm.mmm / 60
+    let lon_minutes = raw.lon_min as f64 + raw.lon_min_frac as f64 / 1000.0;
+    let mut longitude = raw.lon_deg as f64 + lon_minutes / 60.0;
+    if !raw.lon_east {
+        longitude = -longitude;
+    }
+
+    // Altitude in meters (0.1m resolution)
+    let mut altitude = raw.alt_tenths as f64 / 10.0;
+    if raw.alt_negative {
+        altitude = -altitude;
+    }
+
+    GpsPosition {
+        latitude,
+        longitude,
+        altitude,
+        course: raw.course,
+        speed: raw.speed_tenths as f64 / 10.0,
+        utc_year: raw.utc_year,
+        utc_month: raw.utc_month,
+        utc_day: raw.utc_day,
+        utc_hour: raw.utc_hour,
+        utc_minute: raw.utc_minute,
+        utc_second: raw.utc_second,
     }
 }

@@ -5,6 +5,50 @@ use crate::frequency::Frequency;
 use crate::mode::OperatingMode;
 use crate::protocol::Frame;
 
+/// Raw GPS position data decoded from BCD nibbles (all integer fields).
+///
+/// Latitude/longitude stored in dd°mm.mmm format as separate integer parts.
+/// Convert to decimal degrees via `RawGpsPosition::to_gps_position()`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawGpsPosition {
+    /// Latitude degrees (0–90).
+    pub lat_deg: u8,
+    /// Latitude minutes integer part (0–59).
+    pub lat_min: u8,
+    /// Latitude minutes fractional part in thousandths (0–999).
+    pub lat_min_frac: u16,
+    /// true = North, false = South.
+    pub lat_north: bool,
+    /// Longitude degrees (0–180).
+    pub lon_deg: u16,
+    /// Longitude minutes integer part (0–59).
+    pub lon_min: u8,
+    /// Longitude minutes fractional part in thousandths (0–999).
+    pub lon_min_frac: u16,
+    /// true = East, false = West.
+    pub lon_east: bool,
+    /// Altitude in tenths of a meter (raw value before sign).
+    pub alt_tenths: u32,
+    /// true = negative altitude.
+    pub alt_negative: bool,
+    /// Course in degrees (0–359).
+    pub course: u16,
+    /// Speed in tenths of km/h.
+    pub speed_tenths: u32,
+    /// UTC year (e.g. 2026).
+    pub utc_year: u16,
+    /// UTC month (1–12).
+    pub utc_month: u8,
+    /// UTC day (1–31).
+    pub utc_day: u8,
+    /// UTC hour (0–23).
+    pub utc_hour: u8,
+    /// UTC minute (0–59).
+    pub utc_minute: u8,
+    /// UTC second (0–59).
+    pub utc_second: u8,
+}
+
 /// A typed response from the radio.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Response {
@@ -36,6 +80,8 @@ pub enum Response {
     /// DTCS code and polarity (response to ReadTone 0x02).
     /// Contains (tx_polarity, rx_polarity, code). Polarity: 0=Normal, 1=Reverse.
     DtcsCode(u8, u8, u16),
+    /// GPS position data (response to ReadGpsPosition).
+    GpsPosition(RawGpsPosition),
 }
 
 /// Parse a response `Frame` into a typed `Response`, using the original `Command`
@@ -77,6 +123,7 @@ pub fn parse_response(frame: &Frame, command: &Command) -> Result<Response> {
         Command::SetVarious(_, _) => Ok(Response::Ok),
         Command::SetTone(_, _) => Ok(Response::Ok),
         Command::SetDtcs(_, _, _) => Ok(Response::Ok),
+        Command::ReadGpsPosition => parse_gps_position_response(frame),
     }
 }
 
@@ -234,6 +281,101 @@ fn parse_tone_response(frame: &Frame, expected_sub: u8) -> Result<Response> {
         }
         _ => Err(CivError::InvalidFrame),
     }
+}
+
+/// Extract the high nibble of a byte (the "H" digit).
+fn hi(b: u8) -> u8 {
+    (b >> 4) & 0x0F
+}
+
+/// Extract the low nibble of a byte (the "L" digit).
+fn lo(b: u8) -> u8 {
+    b & 0x0F
+}
+
+/// Parse a GPS position response frame (command 0x23, sub 0x00).
+///
+/// The response data contains 27 bytes of BCD-encoded position data.
+/// Each byte holds two BCD digits (high nibble = H, low nibble = L).
+///
+/// See the user-provided byte layout documentation for full details.
+fn parse_gps_position_response(frame: &Frame) -> Result<Response> {
+    let sub = frame.sub_command.ok_or(CivError::InvalidFrame)?;
+    if sub != 0x00 {
+        return Err(CivError::InvalidFrame);
+    }
+    // We expect 27 bytes of data (bytes 1–27 in the spec).
+    // The sub_command byte is already consumed, so all 27 should be in frame.data.
+    if frame.data.len() != 27 {
+        return Err(CivError::InvalidFrame);
+    }
+    let d = &frame.data;
+
+    // Bytes 1-5: Latitude (dd°mm.mmm)
+    let lat_deg = hi(d[0]) * 10 + lo(d[0]);
+    let lat_min = hi(d[1]) * 10 + lo(d[1]);
+    let lat_min_frac = hi(d[2]) as u16 * 100 + lo(d[2]) as u16 * 10 + hi(d[3]) as u16;
+    // d[3] lo = 0 fixed, d[4] hi = 0 fixed
+    let lat_north = lo(d[4]) == 1;
+
+    // Bytes 6-11: Longitude (ddd°mm.mmm)
+    // d[5] hi = 0 fixed
+    let lon_deg = lo(d[5]) as u16 * 100 + hi(d[6]) as u16 * 10 + lo(d[6]) as u16;
+    let lon_min = hi(d[7]) * 10 + lo(d[7]);
+    let lon_min_frac = hi(d[8]) as u16 * 100 + lo(d[8]) as u16 * 10 + hi(d[9]) as u16;
+    // d[9] lo = 0 fixed, d[10] hi = 0 fixed
+    let lon_east = lo(d[10]) == 1;
+
+    // Bytes 12-15: Altitude (0.1m steps)
+    let alt_tenths = hi(d[11]) as u32 * 100_000
+        + lo(d[11]) as u32 * 10_000
+        + hi(d[12]) as u32 * 1_000
+        + lo(d[12]) as u32 * 100
+        + hi(d[13]) as u32 * 10
+        + lo(d[13]) as u32;
+    // d[14] hi = 0 fixed
+    let alt_negative = lo(d[14]) == 1;
+
+    // Bytes 16-17: Course (1° steps)
+    let course = hi(d[15]) as u16 * 100 + lo(d[15]) as u16 * 10 + hi(d[16]) as u16;
+
+    // Bytes 18-20: Speed (0.1 km/h steps)
+    let speed_tenths = hi(d[17]) as u32 * 100_000
+        + lo(d[17]) as u32 * 10_000
+        + hi(d[18]) as u32 * 1_000
+        + lo(d[18]) as u32 * 100
+        + hi(d[19]) as u32 * 10
+        + lo(d[19]) as u32;
+
+    // Bytes 21-27: UTC date/time (YYYYMMDDhhmmss)
+    let utc_year =
+        hi(d[20]) as u16 * 1000 + lo(d[20]) as u16 * 100 + hi(d[21]) as u16 * 10 + lo(d[21]) as u16;
+    let utc_month = hi(d[22]) * 10 + lo(d[22]);
+    let utc_day = hi(d[23]) * 10 + lo(d[23]);
+    let utc_hour = hi(d[24]) * 10 + lo(d[24]);
+    let utc_minute = hi(d[25]) * 10 + lo(d[25]);
+    let utc_second = hi(d[26]) * 10 + lo(d[26]);
+
+    Ok(Response::GpsPosition(RawGpsPosition {
+        lat_deg,
+        lat_min,
+        lat_min_frac,
+        lat_north,
+        lon_deg,
+        lon_min,
+        lon_min_frac,
+        lon_east,
+        alt_tenths,
+        alt_negative,
+        course,
+        speed_tenths,
+        utc_year,
+        utc_month,
+        utc_day,
+        utc_hour,
+        utc_minute,
+        utc_second,
+    }))
 }
 
 #[cfg(test)]
@@ -416,5 +558,83 @@ mod tests {
         let frame = make_response_frame(cmd::TONE, Some(tone_sub::DTCS), vec![0x10, 0x07, 0x54]);
         let resp = parse_response(&frame, &Command::ReadTone(tone_sub::DTCS)).unwrap();
         assert_eq!(resp, Response::DtcsCode(1, 0, 754));
+    }
+
+    #[test]
+    fn test_parse_gps_position() {
+        // Example: 40°41.892'N, 074°02.536'W, Alt 10.2m, Course 125°, Speed 5.2 km/h
+        // UTC: 2026-02-17 15:30:45
+        //
+        // Lat: 40°41.892 N
+        //   Byte 1: 0x40 (4,0 → 40°)
+        //   Byte 2: 0x41 (4,1 → 41')
+        //   Byte 3: 0x89 (8,9 → .89_)
+        //   Byte 4: 0x20 (2,0 → .xx2, 0=fixed)
+        //   Byte 5: 0x01 (0=fixed, 1=North)
+        //
+        // Lon: 074°02.536 W
+        //   Byte 6: 0x00 (0=fixed, 0=100°digit)
+        //   Byte 7: 0x74 (7,4 → 74, so 074°)
+        //   Byte 8: 0x02 (0,2 → 02')
+        //   Byte 9: 0x53 (5,3 → .53_)
+        //   Byte10: 0x60 (6,0 → .xx6, 0=fixed)
+        //   Byte11: 0x00 (0=fixed, 0=West)
+        //
+        // Alt: 10.2m positive
+        //   Byte12: 0x00 (0,0)
+        //   Byte13: 0x01 (0,1)
+        //   Byte14: 0x02 (0,2) → 000102 tenths = 102 → 10.2m
+        //   Byte15: 0x00 (0=fixed, 0=positive)
+        //
+        // Course: 125°
+        //   Byte16: 0x12 (1,2 → 12_)
+        //   Byte17: 0x50 (5,0 → __5, 0=fixed?) → 125
+        //
+        // Speed: 5.2 km/h → 52 tenths
+        //   Byte18: 0x00 (0,0)
+        //   Byte19: 0x00 (0,0)
+        //   Byte20: 0x52 (5,2) → 000052 tenths = 52
+        //
+        // UTC: 2026-02-17 15:30:45
+        //   Byte21: 0x20 (2,0)
+        //   Byte22: 0x26 (2,6) → year 2026
+        //   Byte23: 0x02 (0,2) → month 02
+        //   Byte24: 0x17 (1,7) → day 17
+        //   Byte25: 0x15 (1,5) → hour 15
+        //   Byte26: 0x30 (3,0) → minute 30
+        //   Byte27: 0x45 (4,5) → second 45
+        let data = vec![
+            0x40, 0x41, 0x89, 0x20, 0x01, // lat
+            0x00, 0x74, 0x02, 0x53, 0x60, 0x00, // lon
+            0x00, 0x01, 0x02, 0x00, // alt
+            0x12, 0x50, // course
+            0x00, 0x00, 0x52, // speed
+            0x20, 0x26, 0x02, 0x17, 0x15, 0x30, 0x45, // datetime
+        ];
+        let frame = make_response_frame(cmd::READ_GPS, Some(0x00), data);
+        let resp = parse_response(&frame, &Command::ReadGpsPosition).unwrap();
+        assert_eq!(
+            resp,
+            Response::GpsPosition(RawGpsPosition {
+                lat_deg: 40,
+                lat_min: 41,
+                lat_min_frac: 892,
+                lat_north: true,
+                lon_deg: 74,
+                lon_min: 2,
+                lon_min_frac: 536,
+                lon_east: false,
+                alt_tenths: 102,
+                alt_negative: false,
+                course: 125,
+                speed_tenths: 52,
+                utc_year: 2026,
+                utc_month: 2,
+                utc_day: 17,
+                utc_hour: 15,
+                utc_minute: 30,
+                utc_second: 45,
+            })
+        );
     }
 }

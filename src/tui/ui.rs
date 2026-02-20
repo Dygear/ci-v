@@ -8,7 +8,7 @@ use super::app::{
     self, App, CTCSS_TONES, DTCS_CODES, DuplexDir, Focus, InputMode, OffsetEditPhase, PowerLevel,
     ToneEditPhase, ToneType,
 };
-use super::message::{Vfo, VfoState};
+use super::message::{GpsPosition, Vfo, VfoState};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -31,13 +31,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Layout: meters row, VFO A, VFO B, error log, help bar.
+    // Layout: meters row, VFO A, VFO B, GPS, error log, help bar.
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // compact meters row
             Constraint::Length(1), // VFO A row
             Constraint::Length(1), // VFO B row
+            Constraint::Length(1), // GPS row
             Constraint::Min(0),    // error log
             Constraint::Length(1), // help bar
         ])
@@ -63,11 +64,15 @@ pub fn draw(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(Paragraph::new(vfo_b_line), chunks[2]);
 
+    // GPS row.
+    let gps_line = render_gps_row(&app.radio_state.gps_position);
+    frame.render_widget(Paragraph::new(gps_line), chunks[3]);
+
     // Error log.
-    render_error_log(frame, app, chunks[3]);
+    render_error_log(frame, app, chunks[4]);
 
     // Help bar: left-aligned help text + right-aligned stats.
-    let help_area = chunks[4];
+    let help_area = chunks[5];
     let help_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Min(0), Constraint::Length(62)])
@@ -205,6 +210,50 @@ fn render_compact_meter(
     }
 
     Line::from(spans)
+}
+
+fn render_gps_row(gps: &Option<GpsPosition>) -> Line<'static> {
+    match gps {
+        None => Line::from(Span::styled(" GPS: No Fix", Style::default())),
+        Some(p) => {
+            // Latitude: convert decimal degrees back to dd°mm.mmm'N/S
+            let lat_abs = p.latitude.abs();
+            let lat_deg = lat_abs as u32;
+            let lat_min = (lat_abs - lat_deg as f64) * 60.0;
+            let lat_ns = if p.latitude >= 0.0 { 'N' } else { 'S' };
+
+            // Longitude: convert decimal degrees back to ddd°mm.mmm'E/W
+            let lon_abs = p.longitude.abs();
+            let lon_deg = lon_abs as u32;
+            let lon_min = (lon_abs - lon_deg as f64) * 60.0;
+            let lon_ew = if p.longitude >= 0.0 { 'E' } else { 'W' };
+
+            let lat_str = format!("{lat_deg:02}\u{00B0}{lat_min:06.3}'{lat_ns}");
+            let lon_str = format!("{lon_deg:03}\u{00B0}{lon_min:06.3}'{lon_ew}");
+            let alt_str = format!("{:.1}m", p.altitude);
+            let hdg_str = format!("{:03}\u{00B0}", p.course);
+            let spd_str = format!("{:.1}km/h", p.speed);
+            let utc_str = format!(
+                "{:04}-{:02}-{:02} {:02}:{:02}:{:02}Z",
+                p.utc_year, p.utc_month, p.utc_day, p.utc_hour, p.utc_minute, p.utc_second
+            );
+
+            Line::from(vec![
+                Span::styled(" GPS: ", Style::default().fg(Color::White)),
+                Span::styled(lat_str, Style::default().fg(Color::Green)),
+                Span::styled("  ", Style::default()),
+                Span::styled(lon_str, Style::default().fg(Color::Cyan)),
+                Span::styled("  Alt:", Style::default().fg(Color::White)),
+                Span::styled(format!("{alt_str:>8}"), Style::default().fg(Color::Yellow)),
+                Span::styled("  Hdg:", Style::default().fg(Color::White)),
+                Span::styled(hdg_str, Style::default().fg(Color::Magenta)),
+                Span::styled("  Spd:", Style::default().fg(Color::White)),
+                Span::styled(format!("{spd_str:>9}"), Style::default().fg(Color::Magenta)),
+                Span::styled("  ", Style::default()),
+                Span::styled(utc_str, Style::default()),
+            ])
+        }
+    }
 }
 
 fn render_vfo_row(vfo: Vfo, state: &VfoState, is_selected: bool, app: &App) -> Line<'static> {
