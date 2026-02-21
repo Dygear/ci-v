@@ -30,8 +30,30 @@ pub fn radio_loop(
 
     // Per-VFO caches — we only poll the active VFO, so cache the other.
     let mut active_vfo = Vfo::A;
-    let mut cached_vfo_a = VfoState::default();
-    let mut cached_vfo_b = VfoState::default();
+
+    // Initialization: read both VFOs on startup.
+    // Start by selecting VFO A and reading its state.
+    let _ = radio.select_vfo_a();
+    let (mut cached_vfo_a, s_meter, af_level, squelch, gps_position) = poll_state(&mut radio);
+
+    // Switch to VFO B and read its state.
+    let _ = radio.select_vfo_b();
+    let (mut cached_vfo_b, _, _, _, _) = poll_state(&mut radio);
+
+    // Switch back to VFO A (the default active VFO).
+    let _ = radio.select_vfo_a();
+
+    // Send the initial state to the TUI.
+    let _ = event_tx.send(RadioEvent::StateUpdate(RadioState {
+        vfo_a: cached_vfo_a.clone(),
+        vfo_b: cached_vfo_b.clone(),
+        s_meter,
+        af_level,
+        squelch,
+        gps_position,
+        tx_bits_per_sec: 0,
+        rx_bits_per_sec: 0,
+    }));
 
     loop {
         // Process any pending commands (non-blocking).
