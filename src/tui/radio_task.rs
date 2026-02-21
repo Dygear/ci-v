@@ -31,6 +31,13 @@ pub fn radio_loop(
     // Per-VFO caches — we only poll the active VFO, so cache the other.
     let mut active_vfo = Vfo::A;
 
+    // Power on the radio (harmless if already on).
+    if let Err(e) = radio.power_on() {
+        let _ = event_tx.send(RadioEvent::Error(format!("power on: {e}")));
+    }
+    // Allow the radio time to boot before polling.
+    thread::sleep(Duration::from_millis(500));
+
     // Initialization: read both VFOs on startup.
     // Start by selecting VFO A and reading its state.
     let _ = radio.select_vfo_a();
@@ -134,6 +141,8 @@ fn execute_command(radio: &mut Radio, cmd: &RadioCommand) -> crate::Result<()> {
         RadioCommand::SetTxTone(freq) => radio.set_tx_tone(*freq),
         RadioCommand::SetRxTone(freq) => radio.set_rx_tone(*freq),
         RadioCommand::SetDtcsCode(tx_pol, rx_pol, code) => radio.set_dtcs(*tx_pol, *rx_pol, *code),
+        RadioCommand::PowerOn => radio.power_on(),
+        RadioCommand::PowerOff => radio.power_off(),
         RadioCommand::Quit => Ok(()),
     }
 }

@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
-use log::{trace, warn};
+use log::{info, trace, warn};
 
 use crate::command::{Command, level_sub, meter_sub, tone_sub, various_sub};
 use crate::error::{CivError, Result};
@@ -301,6 +301,49 @@ impl Radio {
             Response::Ng => Err(CivError::Ng),
             other => {
                 warn!("unexpected response to SelectVfoB: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Power on the radio with the required wake-up preamble.
+    ///
+    /// The CI-V interface requires a burst of `0xFE` bytes before the power-on
+    /// frame to wake the serial interface when the radio is off. The number of
+    /// preamble bytes depends on the baud rate:
+    /// - 4800 bps: 15
+    /// - 9600 bps: 30
+    /// - 19200 bps: 60
+    pub fn power_on(&mut self) -> Result<()> {
+        let preamble_count = match self.config.baud_rate {
+            4800 => 15,
+            9600 => 30,
+            _ => 60, // 19200 and above
+        };
+
+        let preamble = vec![0xFE; preamble_count];
+        info!("sending {} preamble bytes for power-on", preamble_count);
+        self.port.write_all(&preamble).map_err(CivError::Io)?;
+        self.port.flush().map_err(CivError::Io)?;
+        self.tx_bytes += preamble_count as u64;
+
+        match self.send_command(&Command::PowerOn)? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to PowerOn: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Power off the radio.
+    pub fn power_off(&mut self) -> Result<()> {
+        match self.send_command(&Command::PowerOff)? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to PowerOff: {:?}", other);
                 Err(CivError::InvalidFrame)
             }
         }

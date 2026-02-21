@@ -52,6 +52,10 @@ pub enum RadioCommand {
     SetRxTone(u16),
     /// Set DTCS code and polarity (tx_pol, rx_pol, code).
     SetDtcsCode(u8, u8, u16),
+    /// Power on the radio (with wake-up preamble).
+    PowerOn,
+    /// Power off the radio.
+    PowerOff,
     Quit,
 }
 
