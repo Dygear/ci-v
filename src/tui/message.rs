@@ -60,6 +60,7 @@ pub enum RadioCommand {
 pub enum RadioEvent {
     StateUpdate(RadioState),
     Error(String),
+    Info(String),
     Connected,
     Disconnected,
 }

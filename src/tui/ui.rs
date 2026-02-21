@@ -5,8 +5,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::app::{
-    self, App, CTCSS_TONES, DTCS_CODES, DuplexDir, Focus, InputMode, OffsetEditPhase, PowerLevel,
-    ToneEditPhase, ToneType,
+    self, App, CTCSS_TONES, DTCS_CODES, DuplexDir, Focus, InputMode, LogLevel, OffsetEditPhase,
+    PowerLevel, ToneEditPhase, ToneType,
 };
 use super::message::{GpsPosition, Vfo, VfoState};
 
@@ -641,13 +641,17 @@ fn render_error_log(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let start = app.error_log.len().saturating_sub(visible);
     let lines: Vec<Line<'static>> = app.error_log[start..]
         .iter()
-        .map(|(timestamp, msg)| {
+        .map(|(timestamp, level, msg)| {
             let elapsed = timestamp.elapsed().as_secs();
             let mins = elapsed / 60;
             let secs = elapsed % 60;
+            let color = match level {
+                LogLevel::Error => Color::Red,
+                LogLevel::Info => Color::Blue,
+            };
             Line::from(Span::styled(
                 format!("  [{mins:>3}:{secs:02}] {msg}"),
-                Style::default().fg(Color::Red),
+                Style::default().fg(color),
             ))
         })
         .collect();

@@ -8,6 +8,13 @@ use crate::mode::OperatingMode;
 
 use super::message::{RadioCommand, RadioEvent, RadioState, Vfo, VfoState};
 
+/// Severity level for log entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Info,
+    Error,
+}
+
 /// Which field is focused for editing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -266,7 +273,7 @@ pub struct App {
     pub radio_state: RadioState,
     pub input_mode: InputMode,
     pub connected: bool,
-    pub error_log: Vec<(Instant, String)>,
+    pub error_log: Vec<(Instant, LogLevel, String)>,
     pub should_quit: bool,
     pub baud_rate: u32,
 
@@ -347,7 +354,10 @@ impl App {
                 self.radio_state = state;
             }
             RadioEvent::Error(msg) => {
-                self.error_log.push((Instant::now(), msg));
+                self.error_log.push((Instant::now(), LogLevel::Error, msg));
+            }
+            RadioEvent::Info(msg) => {
+                self.error_log.push((Instant::now(), LogLevel::Info, msg));
             }
             RadioEvent::Connected => {
                 self.connected = true;
