@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CI-V Controller — ICOM ID-52A Plus</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>CI-V Controller</h1>
+            <div id="connection">
+                <button id="btn-power-on">Power On</button>
+                <button id="btn-power-off">Power Off</button>
+                <button id="btn-connect">Connect</button>
+                <button id="btn-disconnect" disabled>Disconnect</button>
+                <span id="status">Disconnected</span>
+            </div>
+        </header>
+
+        <main>
+            <!-- Meters Section -->
+            <section id="meters-section">
+                <div class="meter">
+                    <label>S-Meter</label>
+                    <div class="meter-bar">
+                        <div class="meter-fill" id="s-meter-fill"></div>
+                    </div>
+                    <span class="meter-value" id="s-meter-value">--</span>
+                </div>
+                <div class="meter">
+                    <label>Volume</label>
+                    <div class="meter-bar">
+                        <div class="meter-fill" id="vol-fill"></div>
+                    </div>
+                    <span class="meter-value" id="vol-value">--</span>
+                </div>
+                <div class="meter">
+                    <label>Squelch</label>
+                    <div class="meter-bar">
+                        <div class="meter-fill" id="sql-fill"></div>
+                    </div>
+                    <span class="meter-value" id="sql-value">--</span>
+                </div>
+            </section>
+            <!-- VFO Section -->
+            <section id="vfo-section">
+                <div id="vfo-a" class="vfo-panel active">
+                    <div class="vfo-label">
+                        <button class="vfo-select" data-vfo="A">VFO A</button>
+                    </div>
+                    <div class="vfo-frequency" id="freq-a">----.---.--- MHz</div>
+                    <div class="vfo-mode" id="mode-a">--</div>
+                    <div class="vfo-tone" id="tone-a">--</div>
+                </div>
+                <div id="vfo-b" class="vfo-panel">
+                    <div class="vfo-label">
+                        <button class="vfo-select" data-vfo="B">VFO B</button>
+                    </div>
+                    <div class="vfo-frequency" id="freq-b">----.---.--- MHz</div>
+                    <div class="vfo-mode" id="mode-b">--</div>
+                    <div class="vfo-tone" id="tone-b">--</div>
+                </div>
+            </section>
+
+            <!-- Controls Section -->
+            <section id="controls-section">
+                <div class="control-group">
+                    <label for="freq-input">Frequency (MHz)</label>
+                    <input type="text" id="freq-input" placeholder="145.000" inputmode="decimal">
+                    <button id="btn-set-freq">Set</button>
+                </div>
+                <div class="control-group">
+                    <label>Mode</label>
+                    <div class="mode-buttons">
+                        <button class="mode-btn" data-mode="FM">FM</button>
+                        <button class="mode-btn" data-mode="FM-N">FM-N</button>
+                        <button class="mode-btn" data-mode="AM">AM</button>
+                        <button class="mode-btn" data-mode="AM-N">AM-N</button>
+                        <button class="mode-btn" data-mode="DV">DV</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tone / Squelch Section -->
+            <section id="tone-section">
+                <div class="control-group">
+                    <label>Tone Mode</label>
+                    <div class="tone-mode-buttons">
+                        <button class="tone-mode-btn" data-tone-mode="0">CSQ</button>
+                        <button class="tone-mode-btn" data-tone-mode="1">Tone</button>
+                        <button class="tone-mode-btn" data-tone-mode="2">TSQL</button>
+                        <button class="tone-mode-btn" data-tone-mode="3">DTCS</button>
+                    </div>
+                </div>
+                <div class="control-group" id="tone-freq-group">
+                    <label for="tone-freq-select">Tone Freq</label>
+                    <select id="tone-freq-select">
+                        <option value="670">67.0</option>
+                        <option value="693">69.3</option>
+                        <option value="719">71.9</option>
+                        <option value="744">74.4</option>
+                        <option value="770">77.0</option>
+                        <option value="797">79.7</option>
+                        <option value="825">82.5</option>
+                        <option value="854">85.4</option>
+                        <option value="885">88.5</option>
+                        <option value="915">91.5</option>
+                        <option value="948">94.8</option>
+                        <option value="974">97.4</option>
+                        <option value="1000">100.0</option>
+                        <option value="1035">103.5</option>
+                        <option value="1072">107.2</option>
+                        <option value="1109">110.9</option>
+                        <option value="1148">114.8</option>
+                        <option value="1188">118.8</option>
+                        <option value="1230">123.0</option>
+                        <option value="1274">127.3</option>
+                        <option value="1318">131.8</option>
+                        <option value="1365">136.5</option>
+                        <option value="1413" selected>141.3</option>
+                        <option value="1462">146.2</option>
+                        <option value="1514">151.4</option>
+                        <option value="1567">156.7</option>
+                        <option value="1598">159.8</option>
+                        <option value="1622">162.2</option>
+                        <option value="1679">167.9</option>
+                        <option value="1738">173.8</option>
+                        <option value="1799">179.9</option>
+                        <option value="1862">186.2</option>
+                        <option value="1928">192.8</option>
+                        <option value="2035">203.5</option>
+                        <option value="2065">206.5</option>
+                        <option value="2107">210.7</option>
+                        <option value="2181">218.1</option>
+                        <option value="2257">225.7</option>
+                        <option value="2291">229.1</option>
+                        <option value="2336">233.6</option>
+                        <option value="2418">241.8</option>
+                        <option value="2503">250.3</option>
+                        <option value="2541">254.1</option>
+                    </select>
+                    <button id="btn-set-tone">Set</button>
+                </div>
+                <div class="control-group" id="dtcs-group" style="display: none;">
+                    <label for="dtcs-code-select">DCS Code</label>
+                    <select id="dtcs-code-select">
+                        <option value="23">023</option>
+                        <option value="25">025</option>
+                        <option value="26">026</option>
+                        <option value="31">031</option>
+                        <option value="32">032</option>
+                        <option value="36">036</option>
+                        <option value="43">043</option>
+                        <option value="47">047</option>
+                        <option value="51">051</option>
+                        <option value="53">053</option>
+                        <option value="54">054</option>
+                        <option value="65">065</option>
+                        <option value="71">071</option>
+                        <option value="72">072</option>
+                        <option value="73">073</option>
+                        <option value="74">074</option>
+                        <option value="114">114</option>
+                        <option value="115">115</option>
+                        <option value="116">116</option>
+                        <option value="122">122</option>
+                        <option value="125">125</option>
+                        <option value="131">131</option>
+                        <option value="132">132</option>
+                        <option value="134">134</option>
+                        <option value="143">143</option>
+                        <option value="145">145</option>
+                        <option value="152">152</option>
+                        <option value="155">155</option>
+                        <option value="156">156</option>
+                        <option value="162">162</option>
+                        <option value="165">165</option>
+                        <option value="172">172</option>
+                        <option value="174">174</option>
+                        <option value="205">205</option>
+                        <option value="212">212</option>
+                        <option value="223">223</option>
+                        <option value="225">225</option>
+                        <option value="226">226</option>
+                        <option value="243">243</option>
+                        <option value="244">244</option>
+                        <option value="245">245</option>
+                        <option value="246">246</option>
+                        <option value="251">251</option>
+                        <option value="252">252</option>
+                        <option value="255">255</option>
+                        <option value="261">261</option>
+                        <option value="263">263</option>
+                        <option value="265">265</option>
+                        <option value="266">266</option>
+                        <option value="271">271</option>
+                        <option value="274">274</option>
+                        <option value="306">306</option>
+                        <option value="311">311</option>
+                        <option value="315">315</option>
+                        <option value="325">325</option>
+                        <option value="331">331</option>
+                        <option value="332">332</option>
+                        <option value="343">343</option>
+                        <option value="346">346</option>
+                        <option value="351">351</option>
+                        <option value="356">356</option>
+                        <option value="364">364</option>
+                        <option value="365">365</option>
+                        <option value="371">371</option>
+                        <option value="411">411</option>
+                        <option value="412">412</option>
+                        <option value="413">413</option>
+                        <option value="423">423</option>
+                        <option value="431">431</option>
+                        <option value="432">432</option>
+                        <option value="445">445</option>
+                        <option value="446">446</option>
+                        <option value="452">452</option>
+                        <option value="454">454</option>
+                        <option value="455">455</option>
+                        <option value="462">462</option>
+                        <option value="464">464</option>
+                        <option value="465">465</option>
+                        <option value="466">466</option>
+                        <option value="503">503</option>
+                        <option value="506">506</option>
+                        <option value="516">516</option>
+                        <option value="523">523</option>
+                        <option value="526">526</option>
+                        <option value="532">532</option>
+                        <option value="546">546</option>
+                        <option value="565">565</option>
+                        <option value="606">606</option>
+                        <option value="612">612</option>
+                        <option value="624">624</option>
+                        <option value="627">627</option>
+                        <option value="631">631</option>
+                        <option value="632">632</option>
+                        <option value="654">654</option>
+                        <option value="662">662</option>
+                        <option value="664">664</option>
+                        <option value="703">703</option>
+                        <option value="712">712</option>
+                        <option value="723">723</option>
+                        <option value="731">731</option>
+                        <option value="732">732</option>
+                        <option value="734">734</option>
+                        <option value="743">743</option>
+                        <option value="754">754</option>
+                    </select>
+                    <select id="dtcs-polarity">
+                        <option value="NN">NN</option>
+                        <option value="NR">NR</option>
+                        <option value="RN">RN</option>
+                        <option value="RR">RR</option>
+                    </select>
+                    <button id="btn-set-dtcs">Set</button>
+                </div>
+            </section>
+
+            <!-- GPS Section -->
+            <section id="gps-section">
+                <h2>GPS</h2>
+                <div id="gps-data">No GPS data</div>
+            </section>
+
+            <!-- Frame Log -->
+            <section id="log-section">
+                <h2>Frame Log</h2>
+                <div id="frame-log"></div>
+            </section>
+        </main>
+    </div>
+
+    <script type="module" src="civ-web.js"></script>
+</body>
+</html>

@@ -1,3 +1,3 @@
 [workspace]
-members = ["civ-protocol", "civ-tui"]
+members = ["civ-protocol", "civ-tui", "civ-web"]
 resolver = "2"
