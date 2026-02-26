@@ -4,7 +4,7 @@ use crossterm::event::{Event, EventStream, KeyEvent};
 use futures::StreamExt;
 use tokio::sync::mpsc;
 
-use super::message::RadioEvent;
+use crate::message::RadioEvent;
 
 /// Unified application event.
 #[derive(Debug)]

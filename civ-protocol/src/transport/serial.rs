@@ -1,3 +1,4 @@
+use std::io;
 use std::time::Duration;
 
 use log::{debug, info, warn};
@@ -6,6 +7,8 @@ use serialport::SerialPortType;
 use crate::command::Command;
 use crate::error::{CivError, Result};
 use crate::protocol::{Frame, PREAMBLE};
+
+use super::Transport;
 
 /// USB product string to match for the ID-52A Plus.
 const ID52_PRODUCT: &str = "ID-52PLUS";
@@ -17,6 +20,37 @@ const PARITY: serialport::Parity = serialport::Parity::None;
 
 /// Baud rates to try during auto-detection (most common first).
 const BAUD_RATES: &[u32] = &[19200, 9600, 4800];
+
+/// A CI-V transport backed by a native serial port.
+pub struct SerialTransport {
+    port: Box<dyn serialport::SerialPort>,
+}
+
+impl SerialTransport {
+    pub fn new(port: Box<dyn serialport::SerialPort>) -> Self {
+        Self { port }
+    }
+}
+
+impl Transport for SerialTransport {
+    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+        io::Write::write_all(&mut self.port, buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        io::Write::flush(&mut self.port)
+    }
+
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        io::Read::read(&mut self.port, buf)
+    }
+
+    fn set_read_timeout(&mut self, timeout: Duration) -> io::Result<()> {
+        self.port
+            .set_timeout(timeout)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+}
 
 /// Find the serial port for an ID-52A Plus radio.
 ///
@@ -50,7 +84,7 @@ pub fn find_id52_port() -> Result<String> {
 }
 
 /// Open a serial port with CI-V settings (8N1) at the given baud rate.
-pub fn open_port(port_name: &str, baud_rate: u32) -> Result<Box<dyn serialport::SerialPort>> {
+pub fn open_port(port_name: &str, baud_rate: u32) -> Result<SerialTransport> {
     let port = serialport::new(port_name, baud_rate)
         .data_bits(DATA_BITS)
         .stop_bits(STOP_BITS)
@@ -60,22 +94,22 @@ pub fn open_port(port_name: &str, baud_rate: u32) -> Result<Box<dyn serialport::
         .map_err(CivError::Serial)?;
 
     info!("opened {} at {} baud", port_name, baud_rate);
-    Ok(port)
+    Ok(SerialTransport::new(port))
 }
 
 /// Try to auto-detect the baud rate by sending a ReadTransceiverId command
 /// at each candidate rate and checking for a valid response.
 ///
-/// Returns the working baud rate and open port on success.
-pub fn auto_detect_baud(port_name: &str) -> Result<(u32, Box<dyn serialport::SerialPort>)> {
+/// Returns the working baud rate and open transport on success.
+pub fn auto_detect_baud(port_name: &str) -> Result<(u32, SerialTransport)> {
     let cmd_frame = Command::ReadTransceiverId.to_frame()?;
     let cmd_bytes = cmd_frame.to_bytes();
 
     for &baud in BAUD_RATES {
         debug!("trying {} baud on {}", baud, port_name);
 
-        let mut port = match open_port(port_name, baud) {
-            Ok(p) => p,
+        let mut transport = match open_port(port_name, baud) {
+            Ok(t) => t,
             Err(e) => {
                 warn!("failed to open at {} baud: {}", baud, e);
                 continue;
@@ -83,10 +117,10 @@ pub fn auto_detect_baud(port_name: &str) -> Result<(u32, Box<dyn serialport::Ser
         };
 
         // Flush any stale data.
-        let _ = port.clear(serialport::ClearBuffer::All);
+        let _ = transport.port.clear(serialport::ClearBuffer::All);
 
         // Send the command.
-        if let Err(e) = std::io::Write::write_all(&mut port, &cmd_bytes) {
+        if let Err(e) = Transport::write_all(&mut transport, &cmd_bytes) {
             warn!("write failed at {} baud: {}", baud, e);
             continue;
         }
@@ -97,13 +131,13 @@ pub fn auto_detect_baud(port_name: &str) -> Result<(u32, Box<dyn serialport::Ser
         let deadline = std::time::Instant::now() + Duration::from_millis(1000);
 
         while std::time::Instant::now() < deadline {
-            match std::io::Read::read(&mut port, &mut buf) {
+            match Transport::read(&mut transport, &mut buf) {
                 Ok(n) if n > 0 => {
                     accumulated.extend_from_slice(&buf[..n]);
                     // Check if we have a complete frame (not the echo).
                     if let Ok(Some(_)) = find_response_frame(&accumulated) {
                         info!("auto-detected {} baud on {}", baud, port_name);
-                        return Ok((baud, port));
+                        return Ok((baud, transport));
                     }
                 }
                 _ => {

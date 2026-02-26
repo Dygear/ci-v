@@ -4,11 +4,11 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use super::app::{
+use crate::app::{
     self, App, CTCSS_TONES, DTCS_CODES, DuplexDir, Focus, InputMode, LogLevel, OffsetEditPhase,
     PowerLevel, ToneEditPhase, ToneType,
 };
-use super::message::{GpsPosition, Vfo, VfoState};
+use crate::message::{GpsPosition, Vfo, VfoState};
 
 pub fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -434,8 +434,8 @@ fn format_frequency(hz: u64) -> String {
     format!("{mhz:>3}.{khz:03}.{h:03}")
 }
 
-fn mode_width(mode: &crate::mode::OperatingMode) -> &'static str {
-    use crate::mode::OperatingMode::*;
+fn mode_width(mode: &civ_protocol::OperatingMode) -> &'static str {
+    use civ_protocol::OperatingMode::*;
     match mode {
         Fm | Am | Dv => "25kHz",
         FmN | AmN => "12.5k",

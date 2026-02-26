@@ -1,0 +1,13 @@
+[package]
+name = "civ-tui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+civ-protocol = { path = "../civ-protocol", features = ["serial"] }
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+log = "0.4"
+env_logger = "0.11"

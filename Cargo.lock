@@ -107,16 +107,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
-name = "ci-v"
+name = "civ-protocol"
 version = "0.1.0"
 dependencies = [
+ "log",
+ "serialport",
+ "thiserror",
+]
+
+[[package]]
+name = "civ-tui"
+version = "0.1.0"
+dependencies = [
+ "civ-protocol",
  "crossterm",
  "env_logger",
  "futures",
  "log",
  "ratatui",
- "serialport",
- "thiserror",
  "tokio",
 ]
 

@@ -4,6 +4,7 @@ pub type Result<T> = std::result::Result<T, CivError>;
 
 #[derive(Debug, Error)]
 pub enum CivError {
+    #[cfg(feature = "serial")]
     #[error("serial port error: {0}")]
     Serial(#[from] serialport::Error),
 

@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc as tokio_mpsc;
 
-use crate::radio::Radio;
+use civ_protocol::Radio;
 
-use super::message::{GpsPosition, RadioCommand, RadioEvent, RadioState, Vfo, VfoState};
+use crate::message::{GpsPosition, RadioCommand, RadioEvent, RadioState, Vfo, VfoState};
 
 /// Bits per byte on the wire with 8N1 framing (1 start + 8 data + 1 stop).
 const BITS_PER_BYTE: u64 = 10;
@@ -124,7 +124,7 @@ pub fn radio_loop(
     }
 }
 
-fn execute_command(radio: &mut Radio, cmd: &RadioCommand) -> crate::Result<()> {
+fn execute_command(radio: &mut Radio, cmd: &RadioCommand) -> civ_protocol::Result<()> {
     match cmd {
         RadioCommand::SetFrequency(freq) => radio.set_frequency(*freq),
         RadioCommand::SetMode(mode) => radio.set_mode(*mode),

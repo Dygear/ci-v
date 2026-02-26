@@ -1,3 +1,9 @@
+mod app;
+mod event;
+mod message;
+mod radio_task;
+mod ui;
+
 use std::io;
 use std::panic;
 use std::sync::mpsc as std_mpsc;
@@ -11,12 +17,10 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use tokio::sync::mpsc as tokio_mpsc;
 
-use ci_v::Radio;
-use ci_v::tui::app::App;
-use ci_v::tui::event::{AppEvent, EventHandler};
-use ci_v::tui::message::RadioEvent;
-use ci_v::tui::radio_task;
-use ci_v::tui::ui;
+use civ_protocol::Radio;
+use crate::app::App;
+use crate::event::{AppEvent, EventHandler};
+use crate::message::RadioEvent;
 
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -74,7 +78,7 @@ fn main() {
 }
 
 async fn run_tui(
-    cmd_tx: std_mpsc::Sender<ci_v::tui::message::RadioCommand>,
+    cmd_tx: std_mpsc::Sender<crate::message::RadioCommand>,
     radio_event_rx: tokio_mpsc::UnboundedReceiver<RadioEvent>,
     baud_rate: u32,
 ) -> io::Result<()> {

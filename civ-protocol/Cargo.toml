@@ -1,0 +1,13 @@
+[package]
+name = "civ-protocol"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = ["serial"]
+serial = ["dep:serialport"]
+
+[dependencies]
+serialport = { version = "4", optional = true }
+thiserror = "2"
+log = "0.4"

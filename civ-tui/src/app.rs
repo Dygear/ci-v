@@ -3,10 +3,10 @@ use std::time::Instant;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::frequency::Frequency;
-use crate::mode::OperatingMode;
+use civ_protocol::Frequency;
+use civ_protocol::OperatingMode;
 
-use super::message::{RadioCommand, RadioEvent, RadioState, Vfo, VfoState};
+use crate::message::{RadioCommand, RadioEvent, RadioState, Vfo, VfoState};
 
 /// Severity level for log entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

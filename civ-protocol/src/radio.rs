@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::fmt;
 use std::time::{Duration, Instant};
 
 use log::{info, trace, warn};
@@ -6,11 +6,83 @@ use log::{info, trace, warn};
 use crate::command::{Command, level_sub, meter_sub, tone_sub, various_sub};
 use crate::error::{CivError, Result};
 use crate::frequency::Frequency;
+use crate::gps::{self, GpsPosition};
 use crate::mode::OperatingMode;
-use crate::port;
 use crate::protocol::{ADDR_CONTROLLER, ADDR_ID52, Frame};
-use crate::response::{self, RawGpsPosition, Response};
-use crate::tui::message::GpsPosition;
+use crate::response::{self, Response};
+use crate::transport::Transport;
+
+// ---------------------------------------------------------------------------
+// Domain types (moved from tui/message.rs)
+// ---------------------------------------------------------------------------
+
+/// VFO selection.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum Vfo {
+    #[default]
+    A,
+    B,
+}
+
+impl Vfo {
+    /// Toggle between A and B.
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+}
+
+impl fmt::Display for Vfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::A => write!(f, "A"),
+            Self::B => write!(f, "B"),
+        }
+    }
+}
+
+/// Per-VFO state (frequency, mode, and tone/duplex settings).
+#[derive(Debug, Clone, Default)]
+pub struct VfoState {
+    pub frequency: Option<Frequency>,
+    pub mode: Option<OperatingMode>,
+    pub rf_power: Option<u16>,
+    /// Combined tone/squelch function (0x00–0x09 from 0x16/0x5D).
+    pub tone_mode: Option<u8>,
+    /// Tx tone frequency in tenths of Hz (e.g. 1413 = 141.3 Hz).
+    pub tx_tone_freq: Option<u16>,
+    /// Rx tone frequency in tenths of Hz.
+    pub rx_tone_freq: Option<u16>,
+    /// DTCS code (e.g. 23, 754).
+    pub dtcs_code: Option<u16>,
+    /// DTCS Tx polarity (0=Normal, 1=Reverse).
+    pub dtcs_tx_pol: Option<u8>,
+    /// DTCS Rx polarity (0=Normal, 1=Reverse).
+    pub dtcs_rx_pol: Option<u8>,
+    /// Duplex direction (0x10=Simplex, 0x11=DUP-, 0x12=DUP+).
+    pub duplex: Option<u8>,
+    /// Offset frequency.
+    pub offset: Option<Frequency>,
+}
+
+/// Snapshot of all radio state. `None` means not yet read or read failed.
+#[derive(Debug, Clone, Default)]
+pub struct RadioState {
+    pub vfo_a: VfoState,
+    pub vfo_b: VfoState,
+    pub s_meter: Option<u16>,
+    pub af_level: Option<u16>,
+    pub squelch: Option<u16>,
+    pub gps_position: Option<GpsPosition>,
+    pub tx_bits_per_sec: u32,
+    pub rx_bits_per_sec: u32,
+}
+
+// ---------------------------------------------------------------------------
+// Radio connection
+// ---------------------------------------------------------------------------
 
 /// Configuration for the radio connection.
 #[derive(Debug, Clone)]
@@ -38,21 +110,21 @@ impl Default for RadioConfig {
 
 /// A connection to an ICOM radio via CI-V protocol.
 pub struct Radio {
-    port: Box<dyn serialport::SerialPort>,
+    transport: Box<dyn Transport>,
     config: RadioConfig,
     /// Internal read buffer to handle partial reads.
     buf: Vec<u8>,
-    /// Cumulative bytes written to the serial port.
+    /// Cumulative bytes written to the transport.
     tx_bytes: u64,
-    /// Cumulative bytes read from the serial port.
+    /// Cumulative bytes read from the transport.
     rx_bytes: u64,
 }
 
 impl Radio {
-    /// Create a new `Radio` from an already-opened serial port and config.
-    pub fn new(port: Box<dyn serialport::SerialPort>, config: RadioConfig) -> Self {
+    /// Create a new `Radio` from an already-opened transport and config.
+    pub fn new(transport: Box<dyn Transport>, config: RadioConfig) -> Self {
         Self {
-            port,
+            transport,
             config,
             buf: Vec::with_capacity(256),
             tx_bytes: 0,
@@ -78,16 +150,19 @@ impl Radio {
     /// Auto-discover the ID-52A Plus and connect.
     ///
     /// Finds the port, auto-detects the baud rate, and returns a ready-to-use `Radio`.
+    #[cfg(feature = "serial")]
     pub fn auto_connect() -> Result<Self> {
-        let port_name = port::find_id52_port()?;
-        let (baud_rate, port) = port::auto_detect_baud(&port_name)?;
+        use crate::transport::serial::{auto_detect_baud, find_id52_port};
+
+        let port_name = find_id52_port()?;
+        let (baud_rate, transport) = auto_detect_baud(&port_name)?;
 
         let config = RadioConfig {
             baud_rate,
             ..RadioConfig::default()
         };
 
-        Ok(Self::new(port, config))
+        Ok(Self::new(Box::new(transport), config))
     }
 
     /// Send a command and wait for the response.
@@ -96,8 +171,8 @@ impl Radio {
         let bytes = frame.to_bytes();
 
         trace!("TX: {:02X?}", bytes);
-        self.port.write_all(&bytes).map_err(CivError::Io)?;
-        self.port.flush().map_err(CivError::Io)?;
+        self.transport.write_all(&bytes).map_err(CivError::Io)?;
+        self.transport.flush().map_err(CivError::Io)?;
         self.tx_bytes += bytes.len() as u64;
 
         // Read the actual response, skipping echo-back and unsolicited frames.
@@ -147,7 +222,7 @@ impl Radio {
         }
     }
 
-    /// Read data from the serial port into the internal buffer.
+    /// Read data from the transport into the internal buffer.
     fn fill_buf(&mut self, deadline: Instant) -> Result<()> {
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -156,11 +231,11 @@ impl Radio {
 
         // Set the timeout for this read.
         let _ = self
-            .port
-            .set_timeout(remaining.min(Duration::from_millis(100)));
+            .transport
+            .set_read_timeout(remaining.min(Duration::from_millis(100)));
 
         let mut tmp = [0u8; 128];
-        match self.port.read(&mut tmp) {
+        match self.transport.read(&mut tmp) {
             Ok(n) => {
                 trace!("read {} bytes: {:02X?}", n, &tmp[..n]);
                 self.buf.extend_from_slice(&tmp[..n]);
@@ -323,8 +398,8 @@ impl Radio {
 
         let preamble = vec![0xFE; preamble_count];
         info!("sending {} preamble bytes for power-on", preamble_count);
-        self.port.write_all(&preamble).map_err(CivError::Io)?;
-        self.port.flush().map_err(CivError::Io)?;
+        self.transport.write_all(&preamble).map_err(CivError::Io)?;
+        self.transport.flush().map_err(CivError::Io)?;
         self.tx_bytes += preamble_count as u64;
 
         match self.send_command(&Command::PowerOn)? {
@@ -525,49 +600,12 @@ impl Radio {
     /// Read GPS position data from the radio's built-in receiver.
     pub fn read_gps_position(&mut self) -> Result<GpsPosition> {
         match self.send_command(&Command::ReadGpsPosition)? {
-            Response::GpsPosition(raw) => Ok(raw_to_gps_position(&raw)),
+            Response::GpsPosition(raw) => Ok(gps::raw_to_gps_position(&raw)),
             Response::Ng => Err(CivError::Ng),
             other => {
                 warn!("unexpected response to ReadGpsPosition: {:?}", other);
                 Err(CivError::InvalidFrame)
             }
         }
-    }
-}
-
-/// Convert a `RawGpsPosition` (integer BCD fields) to a `GpsPosition` (float fields).
-fn raw_to_gps_position(raw: &RawGpsPosition) -> GpsPosition {
-    // Latitude: dd + mm.mmm / 60
-    let lat_minutes = raw.lat_min as f64 + raw.lat_min_frac as f64 / 1000.0;
-    let mut latitude = raw.lat_deg as f64 + lat_minutes / 60.0;
-    if !raw.lat_north {
-        latitude = -latitude;
-    }
-
-    // Longitude: ddd + mm.mmm / 60
-    let lon_minutes = raw.lon_min as f64 + raw.lon_min_frac as f64 / 1000.0;
-    let mut longitude = raw.lon_deg as f64 + lon_minutes / 60.0;
-    if !raw.lon_east {
-        longitude = -longitude;
-    }
-
-    // Altitude in meters (0.1m resolution)
-    let mut altitude = raw.alt_tenths as f64 / 10.0;
-    if raw.alt_negative {
-        altitude = -altitude;
-    }
-
-    GpsPosition {
-        latitude,
-        longitude,
-        altitude,
-        course: raw.course,
-        speed: raw.speed_tenths as f64 / 10.0,
-        utc_year: raw.utc_year,
-        utc_month: raw.utc_month,
-        utc_day: raw.utc_day,
-        utc_hour: raw.utc_hour,
-        utc_minute: raw.utc_minute,
-        utc_second: raw.utc_second,
     }
 }
