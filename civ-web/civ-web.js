@@ -46,6 +46,8 @@ let disconnecting = false;
 const cmdQueue = [];
 let cmdInFlight = null; // { resolve, reject, timeout, vfo }
 const CMD_TIMEOUT_MS = 2000;
+const WATCHDOG_MS = 5000; // Force-clear cmdInFlight if stuck longer than this.
+let watchdogTimer = null;
 
 // Enqueue a command. Returns a promise that resolves with the parsed response.
 function sendCommand(bytes, { vfo = null } = {}) {
@@ -72,24 +74,63 @@ function pumpQueue() {
     // Set a timeout so we don't hang forever if the radio doesn't respond.
     cmd.timeout = setTimeout(() => {
         if (cmdInFlight === cmd) {
+            log("Command timeout — no response from radio", "log-err");
             cmdInFlight = null;
             cmd.resolve(null); // Resolve with null rather than rejecting — keeps polling alive.
             pumpQueue();
         }
     }, CMD_TIMEOUT_MS);
 
+    // Start watchdog — if cmdInFlight is STILL set after WATCHDOG_MS, force-clear it.
+    // This catches edge cases the normal timeout misses (e.g. stuck writer lock).
+    startWatchdog();
+
     // Write bytes to serial.
-    const writer = port.writable.getWriter();
-    logTx(cmd.bytes);
+    let writer;
+    try {
+        writer = port.writable.getWriter();
+    } catch (err) {
+        log(`Failed to acquire writer: ${err.message}`, "log-err");
+        clearTimeout(cmd.timeout);
+        cmdInFlight = null;
+        cmd.resolve(null);
+        pumpQueue();
+        return;
+    }
+
+    try {
+        logTx(cmd.bytes);
+    } catch (err) {
+        // If logging fails, still send the command but log the error to console.
+        console.error("logTx error:", err);
+    }
+
     writer.write(new Uint8Array(cmd.bytes)).then(() => {
         writer.releaseLock();
     }).catch((err) => {
         writer.releaseLock();
         clearTimeout(cmd.timeout);
         cmdInFlight = null;
-        cmd.reject(err);
+        cmd.resolve(null); // Resolve instead of reject to keep polling alive.
+        log(`Write error: ${err.message}`, "log-err");
         pumpQueue();
     });
+}
+
+// Watchdog: force-clears a stuck cmdInFlight so the queue can never permanently deadlock.
+function startWatchdog() {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
+    watchdogTimer = setTimeout(() => {
+        watchdogTimer = null;
+        if (cmdInFlight) {
+            log("Watchdog: force-clearing stuck command", "log-err");
+            clearTimeout(cmdInFlight.timeout);
+            const cmd = cmdInFlight;
+            cmdInFlight = null;
+            cmd.resolve(null);
+            pumpQueue();
+        }
+    }, WATCHDOG_MS);
 }
 
 // Called by the read loop when a response is parsed.
@@ -259,6 +300,12 @@ async function disconnect() {
 
     stopPolling();
 
+    // Stop watchdog.
+    if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+    }
+
     // Drain any pending commands.
     while (cmdQueue.length > 0) {
         cmdQueue.shift().resolve(null);
@@ -299,12 +346,14 @@ function setConnected(connected) {
 }
 
 async function startReading() {
+    let consecutiveErrors = 0;
     while (port?.readable && !disconnecting) {
         reader = port.readable.getReader();
         try {
             while (true) {
                 const { value, done } = await reader.read();
                 if (done) break;
+                consecutiveErrors = 0; // Successful read — reset error count.
                 if (value && frameBuffer && !disconnecting) {
                     logHex("RX", Array.from(value), "log-rx");
                     try {
@@ -323,20 +372,34 @@ async function startReading() {
             if (err.name !== "NetworkError") {
                 log(`Read error: ${err.message}`, "log-err");
             }
+            consecutiveErrors++;
+            // If we're hitting errors repeatedly, back off before retrying
+            // to avoid a tight error loop that would freeze the browser.
+            if (consecutiveErrors > 3 && !disconnecting) {
+                log("Too many read errors — backing off 1s before retry", "log-err");
+                await new Promise((r) => setTimeout(r, 1000));
+            }
         } finally {
             reader.releaseLock();
             reader = null;
         }
+        // The outer while loop will restart the reader if the port is still
+        // readable and we're not disconnecting. This handles transient errors
+        // instead of silently dying.
     }
 }
 
 // ── Polling ─────────────────────────────────────────────────────────────────
 
 function startPolling() {
+    let pollRunning = false;
+    let gpsPollRunning = false;
+
     pollTimer = setInterval(async () => {
-        if (!port?.writable) return;
-        // Skip this poll cycle if the queue is backed up.
-        if (cmdQueue.length > 0 || cmdInFlight) return;
+        if (!port?.writable || disconnecting) return;
+        // Skip this poll cycle if the queue is backed up or previous poll is still running.
+        if (pollRunning || cmdQueue.length > 0 || cmdInFlight) return;
+        pollRunning = true;
         try {
             const sResp = await sendCommand(encode_read_s_meter());
             if (sResp) handleResponse(sResp);
@@ -345,15 +408,18 @@ function startPolling() {
             const sqlResp = await sendCommand(encode_read_level(LEVEL_SQUELCH));
             if (sqlResp) handleResponse(sqlResp);
         } catch (_) {}
+        pollRunning = false;
     }, 500);
 
     gpsPollTimer = setInterval(async () => {
-        if (!port?.writable) return;
-        if (cmdQueue.length > 0 || cmdInFlight) return;
+        if (!port?.writable || disconnecting) return;
+        if (gpsPollRunning || cmdQueue.length > 0 || cmdInFlight) return;
+        gpsPollRunning = true;
         try {
             const gpsResp = await sendCommand(encode_read_gps());
             if (gpsResp) handleResponse(gpsResp);
         } catch (_) {}
+        gpsPollRunning = false;
     }, 5000);
 }
 
