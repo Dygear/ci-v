@@ -52,4 +52,9 @@ cargo build --release
 ```
 
 # Web Interface
-You may need to install `wasm-pack` with `cargo install wasm-pack` On first builds, you'll need to run `wasm-pack` before starting the server as you'll need the `pkg` folder. `wasm-pack build civ-web --target web --out-dir pkg`. After that, you can run the web interface, with the a built in web server by `cargo run -p civ-web --features serve`, this binds to port `8080`, but you can define your own port with `cargo run -p civ-web --features serve -- 1337` for port `1337` for example.
+First time use.
+* `cargo install wasm-pack`
+* `wasm-pack build civ-web --target web --out-dir pkg`
+* `cargo run -p civ-web --features serve` # Port 8080
+* `cargo run -p civ-web --features serve -- 1337` # Port 1337
+* You may need to add `--release` on windows to stop Smart App Control from blocking the application.
