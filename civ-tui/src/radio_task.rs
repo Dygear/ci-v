@@ -117,13 +117,14 @@ pub fn radio_loop(
             changed = true;
         }
 
-        // --- Medium tier: AF level, squelch, RF power, duplex, offset ---
+        // --- Medium tier: AF level, squelch, RF power, duplex, offset, GPS ---
         if last_medium.elapsed() >= MEDIUM_INTERVAL {
             let new_af = radio.read_af_level().ok();
             let new_sql = radio.read_squelch().ok();
             let new_rf = radio.read_rf_power().ok();
             let new_duplex = radio.read_duplex().ok();
             let new_offset = radio.read_offset().ok();
+            let new_gps = radio.read_gps_position().ok();
 
             if new_af != state.af_level {
                 state.af_level = new_af;
@@ -148,17 +149,20 @@ pub fn radio_loop(
                     changed = true;
                 }
             }
+            if new_gps != state.gps_position {
+                state.gps_position = new_gps;
+                changed = true;
+            }
 
             last_medium = Instant::now();
         }
 
-        // --- Slow tier: tone mode, Tx/Rx tone, DTCS, GPS ---
+        // --- Slow tier: tone mode, Tx/Rx tone, DTCS ---
         if last_slow.elapsed() >= SLOW_INTERVAL {
             let new_tone_mode = radio.read_tone_mode().ok();
             let new_tx_tone = radio.read_tx_tone().ok();
             let new_rx_tone = radio.read_rx_tone().ok();
             let new_dtcs = radio.read_dtcs().ok();
-            let new_gps = radio.read_gps_position().ok();
 
             {
                 let vfo = active_vfo_mut(&mut state, active_vfo);
@@ -189,10 +193,6 @@ pub fn radio_loop(
                     vfo.dtcs_rx_pol = new_dtcs_rx_pol;
                     changed = true;
                 }
-            }
-            if new_gps != state.gps_position {
-                state.gps_position = new_gps;
-                changed = true;
             }
 
             last_slow = Instant::now();
