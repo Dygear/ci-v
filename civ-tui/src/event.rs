@@ -12,7 +12,7 @@ pub enum AppEvent {
     Key(KeyEvent),
     Radio(RadioEvent),
     Tick,
-    Resize(u16, u16),
+    Resize,
 }
 
 /// Merges terminal events, radio events, and a tick timer into a single stream.
@@ -31,7 +31,7 @@ impl EventHandler {
             while let Some(Ok(event)) = reader.next().await {
                 let app_event = match event {
                     Event::Key(key) => AppEvent::Key(key),
-                    Event::Resize(w, h) => AppEvent::Resize(w, h),
+                    Event::Resize(_, _) => AppEvent::Resize,
                     _ => continue,
                 };
                 if tx_term.send(app_event).is_err() {

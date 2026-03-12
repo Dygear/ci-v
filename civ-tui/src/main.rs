@@ -123,7 +123,7 @@ async fn run_tui(
                 AppEvent::Tick => {
                     // Tick wakes the loop so pending dirty redraws are serviced.
                 }
-                AppEvent::Resize(_, _) => {
+                AppEvent::Resize => {
                     // Force a redraw to adapt to the new terminal size.
                     app.dirty = true;
                 }

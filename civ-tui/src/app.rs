@@ -84,6 +84,7 @@ pub enum PowerLevel {
 
 impl PowerLevel {
     /// All levels in order from lowest to highest.
+    #[allow(dead_code)]
     pub const ALL: [PowerLevel; 5] = [
         PowerLevel::SLow,
         PowerLevel::Low1,

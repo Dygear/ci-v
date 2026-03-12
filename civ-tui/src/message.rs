@@ -6,6 +6,7 @@ pub use civ_protocol::{GpsPosition, RadioState, Vfo, VfoState};
 
 /// Commands sent from the TUI to the radio task.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum RadioCommand {
     SetFrequency(Frequency),
     SetMode(OperatingMode),
@@ -35,6 +36,7 @@ pub enum RadioCommand {
 
 /// Events sent from the radio task to the TUI.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum RadioEvent {
     StateUpdate(RadioState),
     Error(String),
