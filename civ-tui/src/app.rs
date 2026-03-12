@@ -678,10 +678,10 @@ impl App {
     fn handle_offset_edit_key(&mut self, code: KeyCode) {
         match self.offset_edit_phase {
             OffsetEditPhase::SelectDirection => match code {
-                KeyCode::Left => {
+                KeyCode::Left | KeyCode::Down => {
                     self.duplex_dir_edit = self.duplex_dir_edit.cycle_prev();
                 }
-                KeyCode::Right => {
+                KeyCode::Right | KeyCode::Up => {
                     self.duplex_dir_edit = self.duplex_dir_edit.cycle_next();
                 }
                 _ => {}
@@ -735,7 +735,17 @@ impl App {
                         .send(RadioCommand::SetDuplex(self.duplex_dir_edit.to_raw()));
                     self.input_mode = InputMode::Normal;
                 } else {
-                    // DUP+/DUP-: advance to offset frequency editing.
+                    // DUP+/DUP-: set frequency-based default offset, then advance.
+                    let freq_hz = self
+                        .active_vfo_state()
+                        .frequency
+                        .map(|f| f.hz())
+                        .unwrap_or(0);
+                    self.offset_edit_hz = if freq_hz >= 300_000_000 {
+                        5_000_000 // UHF: 5 MHz
+                    } else {
+                        600_000 // VHF: 600 kHz
+                    };
                     self.offset_edit_phase = OffsetEditPhase::EditFrequency;
                 }
             }
@@ -755,14 +765,14 @@ impl App {
     fn handle_tone_edit_key(&mut self, code: KeyCode) {
         match self.tone_edit_phase {
             ToneEditPhase::SelectType => match code {
-                KeyCode::Left => {
+                KeyCode::Left | KeyCode::Up => {
                     self.tone_type_edit = match self.tone_type_edit {
                         ToneType::Csq => ToneType::Dpl,
                         ToneType::Tpl => ToneType::Csq,
                         ToneType::Dpl => ToneType::Tpl,
                     };
                 }
-                KeyCode::Right => {
+                KeyCode::Right | KeyCode::Down => {
                     self.tone_type_edit = match self.tone_type_edit {
                         ToneType::Csq => ToneType::Tpl,
                         ToneType::Tpl => ToneType::Dpl,
@@ -773,30 +783,30 @@ impl App {
             },
             ToneEditPhase::SelectValue => match self.tone_type_edit {
                 ToneType::Tpl => match code {
-                    KeyCode::Up => {
-                        if self.tone_freq_edit > 0 {
-                            self.tone_freq_edit -= 1;
-                        }
-                    }
-                    KeyCode::Down => {
+                    KeyCode::Up | KeyCode::Right => {
                         if self.tone_freq_edit < CTCSS_TONES.len() - 1 {
                             self.tone_freq_edit += 1;
+                        }
+                    }
+                    KeyCode::Down | KeyCode::Left => {
+                        if self.tone_freq_edit > 0 {
+                            self.tone_freq_edit -= 1;
                         }
                     }
                     _ => {}
                 },
                 ToneType::Dpl => match code {
-                    KeyCode::Up => {
-                        if self.dtcs_code_edit > 0 {
-                            self.dtcs_code_edit -= 1;
-                        }
-                    }
-                    KeyCode::Down => {
+                    KeyCode::Up | KeyCode::Right => {
                         if self.dtcs_code_edit < DTCS_CODES.len() - 1 {
                             self.dtcs_code_edit += 1;
                         }
                     }
-                    KeyCode::Left | KeyCode::Right => {
+                    KeyCode::Down | KeyCode::Left => {
+                        if self.dtcs_code_edit > 0 {
+                            self.dtcs_code_edit -= 1;
+                        }
+                    }
+                    KeyCode::Char(' ') => {
                         self.dtcs_pol_edit = !self.dtcs_pol_edit;
                     }
                     _ => {}

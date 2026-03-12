@@ -679,13 +679,13 @@ fn render_help(app: &App) -> Line<'static> {
         InputMode::Editing(Focus::TxTone) | InputMode::Editing(Focus::RxTone) => {
             match app.tone_edit_phase {
                 ToneEditPhase::SelectType => {
-                    format!("  \u{2190}\u{2192} [{}]  Enter select  Esc cancel", app.tone_type_edit)
+                    format!("  \u{2190}\u{2192}\u{2191}\u{2193} [{}]  Enter select  Esc cancel", app.tone_type_edit)
                 }
                 ToneEditPhase::SelectValue => match app.tone_type_edit {
                     ToneType::Tpl => {
                         let freq = CTCSS_TONES[app.tone_freq_edit];
                         format!(
-                            "  \u{2191}\u{2193} tone [{}.{}]  Enter confirm  Esc back",
+                            "  \u{2191}\u{2193}\u{2190}\u{2192} tone [{}.{}]  Enter confirm  Esc back",
                             freq / 10, freq % 10
                         )
                     }
@@ -693,7 +693,7 @@ fn render_help(app: &App) -> Line<'static> {
                         let code = DTCS_CODES[app.dtcs_code_edit];
                         let pol = if app.dtcs_pol_edit { "-" } else { "+" };
                         format!(
-                            "  \u{2191}\u{2193} code  \u{2190}\u{2192} polarity [{pol}{code:03}]  Enter confirm  Esc back"
+                            "  \u{2191}\u{2193}\u{2190}\u{2192} code  Space polarity [{pol}{code:03}]  Enter confirm  Esc back"
                         )
                     }
                     ToneType::Csq => "  Enter confirm  Esc cancel".to_string(),
@@ -703,7 +703,7 @@ fn render_help(app: &App) -> Line<'static> {
         InputMode::Editing(Focus::Offset) => {
             match app.offset_edit_phase {
                 OffsetEditPhase::SelectDirection => {
-                    format!("  \u{2190}\u{2192} [{}]  Enter select  Esc cancel", app.duplex_dir_edit.label())
+                    format!("  \u{2190}\u{2192}\u{2191}\u{2193} [{}]  Enter select  Esc cancel", app.duplex_dir_edit.label())
                 }
                 OffsetEditPhase::EditFrequency => {
                     "  \u{2190}\u{2192} move cursor  \u{2191}\u{2193} change digit  0-9 type digit  Enter confirm  Esc back".to_string()
