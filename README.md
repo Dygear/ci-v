@@ -44,17 +44,22 @@ You will likely also need to log out and back in for the changes to take effect.
 ## macOS
 For macOS, you must have [Rust installed](https://rustup.rs/) and added to your PATH environment variable.
 
-## All
+# TUI
 ```bash
 git clone https://github.com/Dygear/ci-v.git
 cd ci-v
-cargo build --release
+cargo run --release --bin civ-tui
 ```
 
 # Web Interface
 First time use.
-* `cargo install wasm-pack`
-* `wasm-pack build civ-web --target web --out-dir pkg`
-* `cargo run -p civ-web --features serve` # Port 8080
-* `cargo run -p civ-web --features serve -- 1337` # Port 1337
+```bash
+cargo install wasm-pack
+wasm-pack build civ-web --target web --out-dir pkg
+cargo run -p civ-web --features serve
+```
+## Different Port
+```bash
+cargo run -p civ-web --features serve -- 1337
+```
 * You may need to add `--release` on windows to stop Smart App Control from blocking the application.
