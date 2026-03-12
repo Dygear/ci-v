@@ -356,6 +356,20 @@ impl App {
                 {
                     self.mute_restore_step = None;
                 }
+                // DUP+/DUP- with a zero offset is an invalid state — treat it as
+                // Simplex and push corrective commands to the radio.
+                let active_vfo = match self.current_vfo {
+                    Vfo::A => &state.vfo_a,
+                    Vfo::B => &state.vfo_b,
+                };
+                if active_vfo
+                    .duplex
+                    .is_some_and(|d| !matches!(DuplexDir::from_raw(d), DuplexDir::Simplex))
+                    && active_vfo.offset.map(|o| o.hz()).unwrap_or(0) == 0
+                {
+                    let _ = self.cmd_tx.send(RadioCommand::SetDuplex(DuplexDir::Simplex.to_raw()));
+                    let _ = self.cmd_tx.send(RadioCommand::SetOffset(0));
+                }
                 self.radio_state = state;
             }
             RadioEvent::Error(msg) => {
@@ -729,17 +743,19 @@ impl App {
         match self.offset_edit_phase {
             OffsetEditPhase::SelectDirection => {
                 if self.duplex_dir_edit == DuplexDir::Simplex {
-                    // Simplex: just set the duplex direction, no offset needed.
+                    // Simplex: set duplex direction and clear the offset.
                     let _ = self
                         .cmd_tx
                         .send(RadioCommand::SetDuplex(self.duplex_dir_edit.to_raw()));
+                    let _ = self.cmd_tx.send(RadioCommand::SetOffset(0));
                     self.input_mode = InputMode::Normal;
                 } else {
                     // DUP+/DUP-: use existing offset if known, otherwise pick a
                     // frequency-based default (VHF → 600 kHz, UHF → 5 MHz).
                     let state = self.active_vfo_state();
-                    self.offset_edit_hz = if let Some(offset) = state.offset {
-                        offset.hz()
+                    let known_offset = state.offset.map(|o| o.hz()).unwrap_or(0);
+                    self.offset_edit_hz = if known_offset > 0 {
+                        known_offset
                     } else {
                         let freq_hz = state.frequency.map(|f| f.hz()).unwrap_or(0);
                         if freq_hz >= 300_000_000 { 5_000_000 } else { 600_000 }

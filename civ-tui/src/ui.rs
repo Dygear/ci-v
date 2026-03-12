@@ -547,13 +547,14 @@ fn tone_edit_display(app: &App) -> String {
 ///
 /// Offset format: `+  5 000 000` (10 chars for the number, space-grouped).
 fn duplex_spans(state: &VfoState, base_style: Style) -> Vec<Span<'static>> {
-    match state.duplex {
-        Some(0x10) => vec![Span::styled("\u{25C6}    Simplex", base_style)],
-        Some(dir @ (0x11 | 0x12)) => {
-            let (sign, color) = if dir == 0x12 {
-                ("+", Color::Yellow)
-            } else {
-                ("-", Color::Cyan)
+    let dir = state.duplex.map(DuplexDir::from_raw).unwrap_or(DuplexDir::Simplex);
+    match dir {
+        DuplexDir::Simplex => vec![Span::styled("\u{25C6}    Simplex", base_style)],
+        DuplexDir::DupPlus | DuplexDir::DupMinus => {
+            let (sign, color) = match dir {
+                DuplexDir::DupPlus => ("+", Color::Yellow),
+                DuplexDir::DupMinus => ("-", Color::Cyan),
+                DuplexDir::Simplex => unreachable!(),
             };
             let offset_str = state
                 .offset
@@ -565,7 +566,6 @@ fn duplex_spans(state: &VfoState, base_style: Style) -> Vec<Span<'static>> {
                 Span::styled(offset_str, style),
             ]
         }
-        _ => vec![Span::styled("---", base_style)],
     }
 }
 
