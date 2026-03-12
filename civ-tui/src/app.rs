@@ -276,6 +276,8 @@ pub struct App {
     pub error_log: Vec<(Instant, LogLevel, String)>,
     pub should_quit: bool,
     pub baud_rate: u32,
+    /// Set to true whenever visible state changes; cleared after each draw.
+    pub dirty: bool,
 
     /// Currently selected VFO (tracked locally since CI-V has no read command for this).
     pub current_vfo: Vfo,
@@ -318,6 +320,7 @@ impl App {
             error_log: Vec::new(),
             should_quit: false,
             baud_rate,
+            dirty: true,
             current_vfo: Vfo::A,
             freq_edit_hz: 146_520_000,
             freq_cursor: 0,
@@ -341,6 +344,7 @@ impl App {
 
     /// Handle a radio event from the radio task.
     pub fn handle_radio_event(&mut self, event: RadioEvent) {
+        self.dirty = true;
         match event {
             RadioEvent::StateUpdate(state) => {
                 // If muted but the radio reports a non-zero volume (user changed
@@ -370,6 +374,7 @@ impl App {
 
     /// Handle a key event.
     pub fn handle_key(&mut self, key: KeyEvent) {
+        self.dirty = true;
         // Ctrl+C always quits.
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
             self.quit();

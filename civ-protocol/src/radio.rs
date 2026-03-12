@@ -44,7 +44,7 @@ impl fmt::Display for Vfo {
 }
 
 /// Per-VFO state (frequency, mode, and tone/duplex settings).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct VfoState {
     pub frequency: Option<Frequency>,
     pub mode: Option<OperatingMode>,
@@ -68,7 +68,7 @@ pub struct VfoState {
 }
 
 /// Snapshot of all radio state. `None` means not yet read or read failed.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct RadioState {
     pub vfo_a: VfoState,
     pub vfo_b: VfoState,

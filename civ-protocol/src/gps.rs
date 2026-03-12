@@ -1,7 +1,7 @@
 use crate::response::RawGpsPosition;
 
 /// GPS position data from the radio's built-in receiver.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct GpsPosition {
     /// Latitude in decimal degrees (negative = South).
     pub latitude: f64,

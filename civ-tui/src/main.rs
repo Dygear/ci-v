@@ -103,7 +103,11 @@ async fn run_tui(
 
     // Main event loop.
     loop {
-        terminal.draw(|frame| ui::draw(frame, &app))?;
+        // Only redraw when something actually changed.
+        if app.dirty {
+            terminal.draw(|frame| ui::draw(frame, &app))?;
+            app.dirty = false;
+        }
 
         if let Some(event) = events.next().await {
             match event {
@@ -117,10 +121,11 @@ async fn run_tui(
                     app.handle_radio_event(radio_event);
                 }
                 AppEvent::Tick => {
-                    // Tick just triggers a redraw (handled by the loop).
+                    // Tick wakes the loop so pending dirty redraws are serviced.
                 }
                 AppEvent::Resize(_, _) => {
-                    // Terminal auto-resizes on next draw.
+                    // Force a redraw to adapt to the new terminal size.
+                    app.dirty = true;
                 }
             }
         }
