@@ -131,7 +131,7 @@ impl PowerLevel {
             Self::Low1 => Self::Low2,
             Self::Low2 => Self::Mid,
             Self::Mid => Self::High,
-            Self::High => Self::High,
+            Self::High => Self::SLow,
         }
     }
 
@@ -414,15 +414,14 @@ impl App {
 
     fn handle_edit_key(&mut self, key: KeyEvent, focus: Focus) {
         // Pressing the same hotkey that entered edit mode cancels without saving.
+        // Exception: Mode, Width, and Power cycle through their values instead.
         let cancel_key = matches!(
             (key.code, focus),
             (KeyCode::Char('f') | KeyCode::Char('F'), Focus::Frequency)
-                | (KeyCode::Char('m') | KeyCode::Char('M'), Focus::Mode)
                 | (KeyCode::Char('a') | KeyCode::Char('A'), Focus::AfLevel)
                 | (KeyCode::Char('s') | KeyCode::Char('S'), Focus::Squelch)
                 | (KeyCode::Char('t') | KeyCode::Char('T'), Focus::TxTone)
                 | (KeyCode::Char('r') | KeyCode::Char('R'), Focus::RxTone)
-                | (KeyCode::Char('p') | KeyCode::Char('P'), Focus::Power)
                 | (KeyCode::Char('o') | KeyCode::Char('O'), Focus::Offset)
         );
 
@@ -621,9 +620,12 @@ impl App {
                 };
                 self.mode_edit = MODE_CYCLE[new_idx];
             }
-            KeyCode::Right | KeyCode::Down => {
+            KeyCode::Right | KeyCode::Down | KeyCode::Char('m') | KeyCode::Char('M') => {
                 let new_idx = (idx + 1) % MODE_CYCLE.len();
                 self.mode_edit = MODE_CYCLE[new_idx];
+            }
+            KeyCode::Char('w') | KeyCode::Char('W') => {
+                self.mode_edit = self.mode_edit.toggle_width();
             }
             _ => {}
         }
@@ -663,7 +665,7 @@ impl App {
 
     fn handle_power_edit_key(&mut self, code: KeyCode) {
         match code {
-            KeyCode::Up | KeyCode::Right => {
+            KeyCode::Up | KeyCode::Right | KeyCode::Char('p') | KeyCode::Char('P') => {
                 self.power_edit = self.power_edit.cycle_up();
             }
             KeyCode::Down | KeyCode::Left => {
