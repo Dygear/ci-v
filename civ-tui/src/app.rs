@@ -735,16 +735,14 @@ impl App {
                         .send(RadioCommand::SetDuplex(self.duplex_dir_edit.to_raw()));
                     self.input_mode = InputMode::Normal;
                 } else {
-                    // DUP+/DUP-: set frequency-based default offset, then advance.
-                    let freq_hz = self
-                        .active_vfo_state()
-                        .frequency
-                        .map(|f| f.hz())
-                        .unwrap_or(0);
-                    self.offset_edit_hz = if freq_hz >= 300_000_000 {
-                        5_000_000 // UHF: 5 MHz
+                    // DUP+/DUP-: use existing offset if known, otherwise pick a
+                    // frequency-based default (VHF → 600 kHz, UHF → 5 MHz).
+                    let state = self.active_vfo_state();
+                    self.offset_edit_hz = if let Some(offset) = state.offset {
+                        offset.hz()
                     } else {
-                        600_000 // VHF: 600 kHz
+                        let freq_hz = state.frequency.map(|f| f.hz()).unwrap_or(0);
+                        if freq_hz >= 300_000_000 { 5_000_000 } else { 600_000 }
                     };
                     self.offset_edit_phase = OffsetEditPhase::EditFrequency;
                 }
