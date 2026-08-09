@@ -82,6 +82,8 @@ pub enum Response {
     DtcsCode(u8, u8, u16),
     /// GPS position data (response to ReadGpsPosition).
     GpsPosition(RawGpsPosition),
+    /// PTT state (response to ReadPtt). `true` = transmitting.
+    Ptt(bool),
 }
 
 /// Parse a response `Frame` into a typed `Response`, using the original `Command`
@@ -124,6 +126,20 @@ pub fn parse_response(frame: &Frame, command: &Command) -> Result<Response> {
         Command::SetTone(_, _) => Ok(Response::Ok),
         Command::SetDtcs(_, _, _) => Ok(Response::Ok),
         Command::ReadGpsPosition => parse_gps_position_response(frame),
+        Command::SetPtt(_) => Ok(Response::Ok),
+        Command::ReadPtt => parse_ptt_response(frame),
+    }
+}
+
+/// Parse a PTT state response frame (0x1C 0x00, one data byte).
+fn parse_ptt_response(frame: &Frame) -> Result<Response> {
+    if frame.sub_command != Some(0x00) || frame.data.len() != 1 {
+        return Err(CivError::InvalidFrame);
+    }
+    match frame.data[0] {
+        0x00 => Ok(Response::Ptt(false)),
+        0x01 => Ok(Response::Ptt(true)),
+        _ => Err(CivError::InvalidFrame),
     }
 }
 

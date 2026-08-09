@@ -597,6 +597,34 @@ impl Radio {
         }
     }
 
+    /// Key (`true`) or unkey (`false`) the transmitter.
+    ///
+    /// Callers are responsible for licensed, bounded use: unkey on every
+    /// exit path (a drop guard is a good idea), and identify per your
+    /// license's rules.
+    pub fn set_ptt(&mut self, on: bool) -> Result<()> {
+        match self.send_command(&Command::SetPtt(on))? {
+            Response::Ok => Ok(()),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to SetPtt: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
+    /// Read the PTT state. `true` = transmitting.
+    pub fn read_ptt(&mut self) -> Result<bool> {
+        match self.send_command(&Command::ReadPtt)? {
+            Response::Ptt(on) => Ok(on),
+            Response::Ng => Err(CivError::Ng),
+            other => {
+                warn!("unexpected response to ReadPtt: {:?}", other);
+                Err(CivError::InvalidFrame)
+            }
+        }
+    }
+
     /// Read GPS position data from the radio's built-in receiver.
     pub fn read_gps_position(&mut self) -> Result<GpsPosition> {
         match self.send_command(&Command::ReadGpsPosition)? {

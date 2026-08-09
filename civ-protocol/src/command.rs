@@ -36,6 +36,8 @@ pub mod cmd {
     pub const READ_ID: u8 = 0x19;
     /// Read GPS position data (My Position).
     pub const READ_GPS: u8 = 0x23;
+    /// Transmit (PTT) control.
+    pub const TX: u8 = 0x1C;
 }
 
 /// Sub-commands for the LEVEL (0x14) command.
@@ -93,6 +95,12 @@ pub mod power_sub {
     pub const ON: u8 = 0x01;
 }
 
+/// Sub-commands for the TX (0x1C) command.
+pub mod tx_sub {
+    /// PTT state: data byte 0x00 = receive, 0x01 = transmit.
+    pub const PTT: u8 = 0x00;
+}
+
 /// A CI-V command to send to the radio.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
@@ -140,6 +148,10 @@ pub enum Command {
     SetDtcs(u8, u8, u16),
     /// Read GPS position data (command 0x23, sub 0x00).
     ReadGpsPosition,
+    /// Key or unkey the transmitter (command 0x1C, sub 0x00).
+    SetPtt(bool),
+    /// Read the PTT state (command 0x1C, sub 0x00).
+    ReadPtt,
 }
 
 impl Command {
@@ -188,6 +200,10 @@ impl Command {
                 Frame::new(cmd::TONE, Some(*sub), vec![0x00, ht_bcd, ut_bcd])
             }
             Command::ReadGpsPosition => Frame::new(cmd::READ_GPS, Some(0x00), vec![]),
+            Command::SetPtt(on) => {
+                Frame::new(cmd::TX, Some(tx_sub::PTT), vec![u8::from(*on)])
+            }
+            Command::ReadPtt => Frame::new(cmd::TX, Some(tx_sub::PTT), vec![]),
             Command::SetDtcs(tx_pol, rx_pol, code) => {
                 // Encode DTCS as 3 bytes: [polarity_nibbles, first_digit_BCD, second_third_BCD]
                 let polarity = (tx_pol << 4) | (rx_pol & 0x0F);
@@ -223,6 +239,7 @@ impl Command {
             Command::SetOffset(_) => cmd::SET_OFFSET,
             Command::ReadTone(_) | Command::SetTone(_, _) | Command::SetDtcs(_, _, _) => cmd::TONE,
             Command::ReadGpsPosition => cmd::READ_GPS,
+            Command::SetPtt(_) | Command::ReadPtt => cmd::TX,
         }
     }
 
@@ -247,6 +264,7 @@ impl Command {
             Command::ReadTone(sub) | Command::SetTone(sub, _) => Some(*sub),
             Command::SetDtcs(_, _, _) => Some(tone_sub::DTCS),
             Command::ReadGpsPosition => Some(0x00),
+            Command::SetPtt(_) | Command::ReadPtt => Some(tx_sub::PTT),
         }
     }
 }
@@ -334,6 +352,21 @@ mod tests {
         let frame = Command::ReadTransceiverId.to_frame().unwrap();
         let bytes = frame.to_bytes();
         assert_eq!(bytes, vec![0xFE, 0xFE, 0xB4, 0xE0, 0x19, 0x00, 0xFD]);
+    }
+
+    #[test]
+    fn test_set_ptt_frames() {
+        let on = Command::SetPtt(true).to_frame().unwrap().to_bytes();
+        assert_eq!(on, vec![0xFE, 0xFE, 0xB4, 0xE0, 0x1C, 0x00, 0x01, 0xFD]);
+        let off = Command::SetPtt(false).to_frame().unwrap().to_bytes();
+        assert_eq!(off, vec![0xFE, 0xFE, 0xB4, 0xE0, 0x1C, 0x00, 0x00, 0xFD]);
+    }
+
+    #[test]
+    fn test_read_ptt_frame() {
+        let frame = Command::ReadPtt.to_frame().unwrap();
+        let bytes = frame.to_bytes();
+        assert_eq!(bytes, vec![0xFE, 0xFE, 0xB4, 0xE0, 0x1C, 0x00, 0xFD]);
     }
 
     #[test]
